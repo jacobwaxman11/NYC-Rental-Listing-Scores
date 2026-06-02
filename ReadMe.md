@@ -1,7 +1,7 @@
 # NYCRentalRankings
 
-Scrape StreetEasy rental listings, score their photos with Gemini, and build a
-training set for a rent-prediction model.
+Scrape StreetEasy rental listings, score their photos with Gemini, and use
+regression models to identify mispriced apartments.
 
 ## Storage
 
@@ -40,42 +40,56 @@ Set `GOOGLE_API_KEY` in a `.env` file before running the scorer.
 `features.py` joins `listings` ⨝ `listing_scores` ⨝ pivoted `listing_amenities`
 into a single ML-ready DataFrame (target = `log_rent`).
 
-Use it from a notebook:
+`prepare_features()` returns a **base** frame with individual amenity one-hot
+columns and all raw Gemini image-score columns. Two optional transforms can
+be applied afterwards to evaluate their effect:
 
 ```python
-from features import prepare_features
-df = prepare_features()
+from features import prepare_features, collapse_amenity_tiers, collapse_image_scores
+
+df = prepare_features()                     # base frame (raw amenities + raw image scores)
 y = df["log_rent"]
 X = df.drop(columns=["listing_id", "log_rent"])
+
+# optional compression for modeling
+df_v2 = collapse_image_scores(df)           # 7 image cols → apt_quality + common_quality
+df_v2 = collapse_amenity_tiers(df_v2)       # 40+ amen_* → amen_tier_a / tier_b / tier_c
 ```
 
-Or from the CLI for inspection:
+`collapse_image_scores` averages correlated Gemini dimensions into two
+composites (`apt_quality`, `common_quality`) while keeping `max_view_quality`,
+`pct_bright_rooms`, and `has_good_view` as standalone features.
+
+`collapse_amenity_tiers` groups amenities into three tiers:
+- **Tier A** (premium): pool, gym, washer/dryer, doorman, central AC, parking, etc.
+- **Tier B** (standard): elevator, dishwasher, laundry, package room, etc.
+- **Tier C** (low-signal): fios_available, virtual, view tags, etc.
+
+CLI usage:
 
 ```bash
-python features.py                          # print summary
-python features.py --output features.csv    # also dump to disk
-python features.py --include-unscored       # use all listings (mean-impute scores)
+python features.py                          # print summary (all transforms applied)
+python features.py --output features.csv    # dump to disk
+python features.py --raw                    # skip tier + composite transforms
+python features.py --include-unscored       # include listings without image scores
 ```
 
-By default, listings whose images haven't been scored yet are dropped. Once
-`score_listings.py` has covered the whole DB, `prepare_features()` returns
-all 314 rows.
+## Modeling
 
-## One-time migration from JSON
+[`NYC_Rental_Listing_Scores.ipynb`](NYC_Rental_Listing_Scores.ipynb) runs
+Ridge and Lasso regression on both the raw and compressed feature sets,
+compares results, and identifies underpriced listings.
 
-If you still have `listings.json`, `listings_scored.json`, and
-`image_scores_cache.json` from an earlier run, import them into the DB once:
-
-```bash
-python migrate_to_sqlite.py
-```
-
-After that the JSON files are unused — they can stay around as a backup.
+Key design decisions:
+- **GroupShuffleSplit** by building slug prevents data leakage (units in the
+  same building don't appear in both train and test)
+- **StandardScaler** inside the pipeline (refit per CV fold)
+- Models are compared across raw (v1) and compressed (v2) feature sets
 
 ## To do
 
-- Feature engineering required to flatten before training model
-- Ridge Regression model
-- Improving the ML model used to score images
-- Add building table to the db
-- listing_snapshots table to handle change in listing status and price
+- Improving the Gemini prompt / scoring model for image reviews
+- Add building table to the DB
+- `listing_snapshots` table to track price and status changes over time
+- Explore non-linear models (gradient boosted trees) once dataset grows
+- Target encoding for neighborhoods as an alternative to one-hot
