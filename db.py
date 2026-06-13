@@ -262,6 +262,26 @@ def listings_missing_amenities(conn: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def listings_never_fetched(conn: sqlite3.Connection) -> list[dict]:
+    """Listings whose detail page has never been fetched — i.e.
+    ``detail_fetched_at`` is still NULL.
+
+    Unlike :func:`listings_missing_amenities`, this never re-selects a listing
+    that was already attempted, even if the fetch turned up no amenities (some
+    listings genuinely have none). Use this to backfill only the truly-missing
+    data without re-hitting StreetEasy for listings we've already processed.
+    """
+    rows = conn.execute(
+        """
+        SELECT l.*
+        FROM listings l
+        WHERE l.detail_fetched_at IS NULL
+        ORDER BY l.listing_id
+        """
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def listings_missing_scores(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         """

@@ -26,6 +26,7 @@ Design notes:
 Example:
     python backfill_details.py
     python backfill_details.py --max-listings 50 --min-delay 8 --max-delay 15
+    python backfill_details.py --only-missing   # skip already-fetched listings
 """
 
 from __future__ import annotations
@@ -199,14 +200,23 @@ def run(
     max_delay: float,
     fingerprints: list[str],
     timeout: int,
+    only_missing: bool,
 ) -> int:
     """Returns the exit code (0 = ok, 2 = stopped on 403)."""
     with dbm.open_db(db_path) as conn:
-        todo = dbm.listings_missing_amenities(conn)
+        if only_missing:
+            # Only listings we've never fetched a detail page for. This skips
+            # listings that were already attempted but came back with no
+            # amenities, so re-runs don't keep re-hitting them.
+            todo = dbm.listings_never_fetched(conn)
+            mode = "never-fetched"
+        else:
+            todo = dbm.listings_missing_amenities(conn)
+            mode = "missing-amenities"
         total = dbm.stats(conn)["listings"]
         print(
             f"DB: {db_path} — {total} listings total; "
-            f"{len(todo)} need detail backfill."
+            f"{len(todo)} need detail backfill (mode: {mode})."
         )
 
         if max_listings is not None:
@@ -367,6 +377,15 @@ def parse_args() -> argparse.Namespace:
         default=20,
         help="Per-request timeout in seconds",
     )
+    p.add_argument(
+        "--only-missing",
+        action="store_true",
+        help="Only fetch listings whose detail page has never been fetched "
+             "(detail_fetched_at IS NULL). Skips listings already attempted, "
+             "even ones that came back with no amenities — so re-runs don't "
+             "keep re-hitting the same listings. Without this flag, any "
+             "listing with an empty amenities table is (re)fetched.",
+    )
     return p.parse_args()
 
 
@@ -383,6 +402,7 @@ def main() -> None:
         max_delay=args.max_delay,
         fingerprints=fingerprints,
         timeout=args.timeout,
+        only_missing=args.only_missing,
     )
     sys.exit(code)
 
