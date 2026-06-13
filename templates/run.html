@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Pipeline · NYC Rental Deals{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/run.css') }}">
+{% endblock %}
+{% block body %}
+<header>
+  <h1>⚙ Pipeline control</h1>
+  <a class="back" href="/">← back to deals</a>
+  <span class="status" style="margin-left:auto">db: {{ db_path }}</span>
+</header>
+<div class="wrap">
+  <div class="panel">
+
+    <div class="stage">
+      <h2>1 · Scrape listings</h2>
+      <p>Search StreetEasy and download photos. Re-runs only fetch new listings.</p>
+      <label>Areas</label>
+      <div class="cs multi" data-name="areas">
+        <button type="button" class="cs-btn"><span id="areas-label">All areas</span><i>▾</i></button>
+        <ul class="cs-menu">
+          <li class="cs-tools">
+            <button type="button" data-all>Select all</button>
+            <button type="button" data-none>Clear</button>
+          </li>
+          {% for id, name in areas %}
+          <li data-value="{{ id }}" class="sel"><span class="nm">{{ name }} <small>{{ id }}</small></span></li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="row">
+        <div><label>Min rent ($/mo)</label><input id="s_price_min" type="number" value="4000"></div>
+        <div><label>Max rent ($/mo)</label><input id="s_price_max" type="number" value="7500"></div>
+      </div>
+      <div class="row">
+        <div><label>Max new listings</label><input id="s_max_listings" type="number" value="250"></div>
+        <div><label>Max pages</label><input id="s_max_pages" type="number" value="100"></div>
+      </div>
+      <button class="run" data-stage="scrape">Start scraping</button>
+    </div>
+
+    <div class="stage">
+      <h2>2 · Backfill details</h2>
+      <p>Amenities, availability, floor plans. Rotates browser fingerprints on a 403.</p>
+      <label>Browser fingerprint(s)</label>
+      <input id="b_impersonate" value="safari180,safari170,chrome131,firefox144">
+      <div class="row">
+        <div><label>Min delay (s)</label><input id="b_min_delay" type="number" value="10"></div>
+        <div><label>Max delay (s)</label><input id="b_max_delay" type="number" value="25"></div>
+      </div>
+      <label>Max listings (blank = all)</label>
+      <input id="b_max_listings" type="number" placeholder="all">
+      <button class="run" data-stage="backfill">Start backfill</button>
+    </div>
+
+    <div class="stage">
+      <h2>3 · Score photos</h2>
+      <p>Vision model scores each photo. Needs the provider's API key in <code>.env</code>.</p>
+      <div class="row">
+        <div><label>Provider</label>
+          <div class="cs" data-name="provider">
+            <button type="button" class="cs-btn"><span>anthropic</span><i>▾</i></button>
+            <ul class="cs-menu">
+              <li data-value="anthropic" class="sel">anthropic</li>
+              <li data-value="gemini">gemini</li>
+            </ul>
+          </div>
+        </div>
+        <div><label>Max listings</label><input id="c_max_listings" type="number" value="50"></div>
+      </div>
+      <label>Model</label>
+      <input id="c_model" value="claude-haiku-4-5">
+      <button class="run" data-stage="score">Start scoring</button>
+    </div>
+
+  </div>
+
+  <div class="console">
+    <div class="console-head">
+      <span id="dot" class="dot"></span>
+      <span id="status" class="status">idle</span>
+      <button id="stop" class="stop" disabled>Stop</button>
+    </div>
+    <pre id="log" class="log"></pre>
+    <div class="hint">Output streams live. A job keeps running if you navigate away —
+      come back here to watch it. Only one stage runs at a time.</div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/run.js') }}"></script>
+{% endblock %}
