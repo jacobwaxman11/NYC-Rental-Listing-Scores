@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "streeteasier"
+version = "0.1.0"
+description = "Scrape, score, and surface mispriced NYC rental listings."
+readme = "ReadMe.md"
+requires-python = ">=3.9"
+dependencies = [
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "google-genai>=0.3",
+    "anthropic>=0.40",
+    "python-dotenv>=1.0",
+    "curl_cffi>=0.7",
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scikit-learn>=1.3",
+    "flask>=3.0",
+    "sentence-transformers>=2.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+# Console entry points: `streeteasier-score` instead of `python score_listings.py`.
+[project.scripts]
+streeteasier-scrape   = "scrape_listings:main"
+streeteasier-backfill = "backfill_details:main"
+streeteasier-score    = "score_listings:main"
+streeteasier-embed    = "embed_listings:main"
+streeteasier-features = "features:main"
+streeteasier-web      = "web:main"
+
+# The project is a flat set of modules (not yet a package); list them explicitly.
+[tool.setuptools]
+py-modules = [
+    "db", "features", "llm", "embeddings",
+    "scrape_listings", "backfill_details", "score_listings", "embed_listings",
+    "web",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
