@@ -7,9 +7,14 @@
 # backfill, and scoring are all driven from the "⚙ Pipeline" page inside the UI.
 #
 # Usage:
-#   ./setup.sh                 # set up + launch on http://127.0.0.1:5000
-#   PORT=8000 ./setup.sh       # override the port
+#   ./setup.sh                 # set up + launch, reachable from other devices
+#   PORT=5000 ./setup.sh       # override the port
 #   PROVIDER=gemini ./setup.sh # override the AI-search provider
+#   HOST=127.0.0.1 ./setup.sh  # local-only (don't expose on the network)
+#
+# By default the server binds to 0.0.0.0 so you can open it from another device
+# on the same network (e.g. your phone over its hotspot) at the printed
+# http://<lan-ip>:<port> URL.
 #
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -17,7 +22,9 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 VENV=".venv"
 PY="$VENV/bin/python"
 PIP="$VENV/bin/pip"
-PORT="${PORT:-5000}"
+# Default to 8000 — port 5000 is taken by macOS AirPlay Receiver (ControlCenter).
+PORT="${PORT:-8000}"
+HOST="${HOST:-0.0.0.0}"
 PROVIDER="${PROVIDER:-anthropic}"
 
 info() { printf '\033[36m%s\033[0m\n' "$1"; }
@@ -53,15 +60,27 @@ if [ "$PROVIDER" = "anthropic" ] && ! has_key ANTHROPIC_API_KEY && has_key GOOGL
 fi
 
 # ── launch ────────────────────────────────────────────────────────────────────
-URL="http://127.0.0.1:${PORT}"
-info "Opening $URL — use the ⚙ Pipeline page to scrape, backfill, and score."
+# Browser always opens locally; the LAN URL is just for other devices.
+LOCAL_URL="http://127.0.0.1:${PORT}"
+info "Opening $LOCAL_URL — use the ⚙ Pipeline page to scrape, backfill, and score."
+
+# When bound to all interfaces, also show the LAN address other devices can use.
+if [ "$HOST" = "0.0.0.0" ]; then
+  LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
+  [ -z "$LAN_IP" ] && LAN_IP="$(ipconfig getifaddr en1 2>/dev/null || true)"
+  if [ -n "$LAN_IP" ]; then
+    ok "On the same network (e.g. your phone): http://${LAN_IP}:${PORT}"
+  else
+    warn "Bound to 0.0.0.0 but couldn't detect a LAN IP. Find it with: ipconfig getifaddr en0"
+  fi
+fi
 
 # Open the browser shortly after the server starts (best-effort, non-fatal).
 (
   sleep 2
-  if command -v open >/dev/null 2>&1; then open "$URL"
-  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL"
+  if command -v open >/dev/null 2>&1; then open "$LOCAL_URL"
+  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$LOCAL_URL"
   fi
 ) >/dev/null 2>&1 &
 
-exec "$PY" web.py --provider "$PROVIDER" --port "$PORT"
+exec "$PY" web.py --provider "$PROVIDER" --host "$HOST" --port "$PORT"
