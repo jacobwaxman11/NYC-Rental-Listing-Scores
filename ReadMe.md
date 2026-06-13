@@ -153,6 +153,27 @@ Use `--model claude-haiku-4-5` (or `gemini-2.5-flash`) for the cheapest calls.
 Needs `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY` in `.env`; without it the UI runs
 normally with AI search disabled.
 
+### Semantic / taste matching (embeddings)
+
+For description-aware "vibe" search, embed listings once with a local
+sentence-transformers model (offline, no API cost):
+
+```bash
+python embed_listings.py            # embeds description + tags + basics
+```
+
+This unlocks two things in the web UI:
+
+- **🧭 Match my likes** — ranks the listings you haven't reviewed by similarity
+  to the centroid of your ❤ listings. Pure local vector math, **no model call**.
+- **Free-text vibe** — the AI-search plan adds a `semantic_query` ("charming
+  prewar with character and light"), which is embedded locally and blended into
+  the ranking, so descriptive wants beyond the structured fields/tags count.
+
+Embeddings are stored in `listing_embeddings` and re-run incrementally
+(`--rebuild` to force). If `embed_listings.py` hasn't been run, Match-my-likes
+is disabled and free-text search falls back to structured filters only.
+
 ## To do
 
 - Improving the Gemini prompt / scoring model for image reviews

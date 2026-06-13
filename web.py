@@ -44,20 +44,31 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 import db as dbm
+import embeddings as emb_mod
 import llm as llm_mod
 from features import collapse_amenity_tiers, collapse_image_scores, prepare_features
 
 
 app = Flask(__name__)
 
-# Populated at startup (and on ?refresh=1) by build_suggestions().
-# "llm" holds a TextLLM or None (AI search disabled). "_search_cache" memoizes
-# query plans so repeat questions cost nothing.
+# Populated at startup (and on ?refresh=1).
+# "llm" holds a TextLLM or None (AI search disabled). "embedder" embeds queries
+# (None if sentence-transformers isn't installed). "embeddings" maps listing_id
+# -> np.ndarray loaded from the DB. "_search_cache" memoizes query plans.
 _STATE: dict = {
     "suggestions": [], "meta": {}, "db_path": dbm.DEFAULT_DB_PATH,
     "llm": None, "ai": {"enabled": False, "provider": None, "model": None},
+    "embedder": None, "embeddings": {},
 }
 _SEARCH_CACHE: dict = {}
+
+
+def _load_embeddings(db_path: str) -> dict:
+    """Load stored listing vectors into memory as float32 arrays for fast cosine
+    ranking (vectors are already L2-normalized at embed time)."""
+    with dbm.open_db(db_path) as conn:
+        raw = dbm.get_all_embeddings(conn)
+    return {lid: np.asarray(vec, dtype=np.float32) for lid, vec in raw.items()}
 
 
 # ── Pipeline job runner (scrape / backfill / score from the UI) ───────────────
@@ -336,10 +347,16 @@ Output schema (use null for anything not implied):
   },
   "rank_by": [ {"field": "sqft"|"rent"|"pct_diff"|"apt_quality"|"beds",
                 "direction": "asc"|"desc", "weight": number} ],
+  "semantic_query": string|null,
   "limit": number
 }
 
 Rules:
+- semantic_query: a short natural-language phrase capturing the descriptive
+  "vibe"/qualities the user wants that are NOT covered by the structured fields
+  or tags (charm, character, light-and-airy, cozy, prewar elegance, quiet,
+  modern minimalist, etc.). It is matched against listing descriptions by
+  embedding similarity to re-rank results. Use null for purely structural asks.
 - Map descriptive wants to tags from context.facets.tags: "exposed brick" ->
   tags_all ["exposed_brick"]; "bright/lots of light" -> ["bright"] or
   ["lots_of_windows"]; "duplex"/"stairs" -> ["duplex"]/["internal_stairs"];
@@ -408,8 +425,12 @@ def _build_context(sugg: list[dict], ref_id: str) -> dict:
     return ctx
 
 
-def _apply_plan(plan: dict, sugg: list[dict]) -> list[dict]:
-    """Execute a query plan locally over the listings — no model calls here."""
+def _apply_plan(plan: dict, sugg: list[dict], query_vec=None) -> list[dict]:
+    """Execute a query plan locally over the listings — no model calls here.
+
+    ``query_vec`` (optional) is an embedding of the plan's semantic_query; when
+    present (and listing embeddings are loaded) it adds a description-similarity
+    term to the ranking."""
     rows = list(sugg)
     f = plan.get("filters") or {}
 
@@ -458,12 +479,23 @@ def _apply_plan(plan: dict, sugg: list[dict]) -> list[dict]:
     rows = [r for r in rows if keep(r)]
 
     rank = [e for e in (plan.get("rank_by") or []) if e.get("field") in _RANK_FIELDS]
-    if rank and rows:
+    emb = _STATE["embeddings"]
+    use_sem = query_vec is not None and bool(emb)
+
+    if (rank or use_sem) and rows:
         ranges = {}
         for e in rank:
             fld = e["field"]
             vals = [r[fld] for r in rows if r.get(fld) is not None]
             ranges[fld] = (min(vals), max(vals)) if vals else (0.0, 0.0)
+
+        sims, slo, shi = {}, 0.0, 0.0
+        if use_sem:
+            for r in rows:
+                v = emb.get(r["listing_id"])
+                sims[r["listing_id"]] = float(np.dot(query_vec, v)) if v is not None else 0.0
+            svals = list(sims.values())
+            slo, shi = (min(svals), max(svals)) if svals else (0.0, 0.0)
 
         def score(r):
             s = 0.0
@@ -476,6 +508,9 @@ def _apply_plan(plan: dict, sugg: list[dict]) -> list[dict]:
                 if e.get("direction") == "asc":
                     nrm = 1.0 - nrm
                 s += w * nrm
+            if use_sem:
+                sv = sims[r["listing_id"]]
+                s += 0.5 if shi == slo else (sv - slo) / (shi - slo)
             return s
 
         rows.sort(key=score, reverse=True)
@@ -504,7 +539,37 @@ def ai_search(query: str, ref_id: str):
         plan = llm_mod.loads_lenient(raw)
         _SEARCH_CACHE[key] = plan
 
-    return plan, _apply_plan(plan, sugg)
+    query_vec = None
+    sq = (plan.get("semantic_query") or "").strip()
+    if sq and _STATE["embedder"] is not None and _STATE["embeddings"]:
+        try:
+            query_vec = _STATE["embedder"].encode([sq])[0]
+        except Exception:
+            query_vec = None
+
+    return plan, _apply_plan(plan, sugg, query_vec=query_vec)
+
+
+def match_likes(limit: int = 40):
+    """Rank unreviewed listings by cosine similarity to the centroid of the
+    user's liked listings' embeddings. Pure local vector math — no model call."""
+    emb = _STATE["embeddings"]
+    sugg = _STATE["suggestions"]
+    if not emb:
+        return [], "⚠ No embeddings yet — run: python embed_listings.py"
+    liked = [r for r in sugg if r["reaction"] == "liked" and r["listing_id"] in emb]
+    if not liked:
+        return [], "⚠ Like a few listings first (with embeddings) to match your taste"
+
+    centroid = np.mean([emb[r["listing_id"]] for r in liked], axis=0)
+    norm = float(np.linalg.norm(centroid))
+    if norm:
+        centroid = centroid / norm
+
+    cands = [r for r in sugg if not r["reaction"] and r["listing_id"] in emb]
+    cands.sort(key=lambda r: float(np.dot(centroid, emb[r["listing_id"]])), reverse=True)
+    n = len(liked)
+    return cands[:limit], f"🧭 Matched to your {n} liked listing{'s' if n != 1 else ''}"
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -514,6 +579,7 @@ def ai_search(query: str, ref_id: str):
 def index():
     if request.args.get("refresh") or not _STATE["suggestions"]:
         _STATE.update(build_suggestions(_STATE["db_path"]))
+        _STATE["embeddings"] = _load_embeddings(_STATE["db_path"])
 
     # Overlay current reactions from the DB so hearts reflect persisted state.
     with dbm.open_db(_STATE["db_path"]) as conn:
@@ -535,6 +601,7 @@ def index():
     q = request.args.get("q", "").strip()
     ref = request.args.get("ref", "").strip()
     tag = request.args.get("tag", "").strip()
+    match = request.args.get("match", "").strip()
     ai = _STATE["ai"]
     ref_name = ""
     if ref:
@@ -553,6 +620,10 @@ def index():
         except Exception as e:  # model/parse failure — surface it, show nothing
             rows = []
             ai_banner = f"⚠ AI search failed: {e}"
+    elif match == "likes":
+        # Taste matching — pure local vector math, no model call.
+        searching = True
+        rows, ai_banner = match_likes()
     else:
         # Standard browse path. Passed listings are hidden except in their view.
         rows = base
@@ -590,6 +661,7 @@ def index():
         q=q, ref=ref, ref_name=ref_name, searching=searching, active_tag=tag,
         ai_enabled=ai["enabled"], ai_provider=ai["provider"],
         ai_model=ai["model"], ai_banner=ai_banner,
+        emb_ready=bool(_STATE["embeddings"]),
     )
 
 
@@ -730,6 +802,9 @@ TEMPLATE = """
                  border:none; border-radius:9px; padding:9px 14px; font-size:13px;
                  font-weight:650; cursor:pointer; }
   .tinder-open:disabled { opacity:.4; cursor:default; }
+  .tinder-open.match { background:linear-gradient(135deg,#60a5fa,#34d399); color:#06281f;
+                       text-decoration:none; display:inline-block; }
+  .tinder-open.disabled { opacity:.4; pointer-events:none; }
 
   /* AI search bar */
   .searchbar { padding:14px 28px; border-bottom:1px solid var(--line);
@@ -883,6 +958,9 @@ TEMPLATE = """
     </div>
 
     <button class="tinder-open" id="tinder-open" {{ 'disabled' if not rows }}>🔥 Tinder mode</button>
+    <a class="tinder-open match {{ 'disabled' if not (emb_ready and liked_total) }}"
+       href="{{ '/?match=likes' if (emb_ready and liked_total) else '#' }}"
+       title="{{ 'Rank unreviewed listings by similarity to what you liked' if emb_ready else 'Run embed_listings.py first to enable' }}">🧭 Match my likes</a>
     <a class="refresh" href="/run">⚙ Pipeline</a>
     <a class="refresh" href="/?refresh=1">↻ recompute</a>
   </div>
@@ -1425,6 +1503,8 @@ def main() -> None:
     p.add_argument("--model", default=None,
                    help="Model for AI search (default: per-provider — gemini-2.5-flash "
                         "or claude-opus-4-8; claude-haiku-4-5 is cheaper)")
+    p.add_argument("--embed-model", default=emb_mod.DEFAULT_MODEL,
+                   help="sentence-transformers model for query embedding (semantic search)")
     p.add_argument("--host", default="127.0.0.1", help="Bind host")
     p.add_argument("--port", type=int, default=5000, help="Bind port")
     p.add_argument("--debug", action="store_true", help="Run Flask in debug mode")
@@ -1437,6 +1517,8 @@ def main() -> None:
     engine = llm_mod.build_llm(args.provider, model)
     _STATE["llm"] = engine
     _STATE["ai"] = {"enabled": engine is not None, "provider": args.provider, "model": model}
+    _STATE["embedder"] = emb_mod.try_build_embedder(args.embed_model)
+    _STATE["embeddings"] = _load_embeddings(args.db)
 
     print(f"Building suggestions from {args.db} …")
     _STATE.update(build_suggestions(args.db))
@@ -1447,6 +1529,12 @@ def main() -> None:
     else:
         key = "GOOGLE_API_KEY" if args.provider == "gemini" else "ANTHROPIC_API_KEY"
         print(f"  AI search: disabled — set {key} (in .env) to enable")
+    n_emb = len(_STATE["embeddings"])
+    if n_emb:
+        sem = "on" if _STATE["embedder"] is not None else "stored-only (install sentence-transformers)"
+        print(f"  Semantic: {n_emb} embeddings loaded — Match-my-likes on, free-text {sem}")
+    else:
+        print("  Semantic: no embeddings — run `python embed_listings.py` to enable taste matching")
     print(f"Serving on http://{args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=args.debug)
 
