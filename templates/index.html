@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}NYC Rental Deals{% endblock %}
+{% block title %}StreetEasier{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
 {% endblock %}
@@ -18,7 +18,7 @@
 {% endmacro %}
 
 <header>
-  <h1>NYC Rental Deals</h1>
+  <h1>StreetEasier</h1>
   <span class="sub">
     {{ meta.underpriced }} below-model of {{ meta.total }} scored ·
     {{ liked_total }} ❤ · {{ passed_total }} ✕ ·
