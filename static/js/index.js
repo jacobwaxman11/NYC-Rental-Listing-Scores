@@ -52,21 +52,18 @@ document.querySelectorAll('.undo').forEach(b => {
   });
 });
 
-// ── AI "✨ similar": set this listing as the reference, focus the search box ──
-const refInput = document.getElementById('ref');
-const refChip = document.getElementById('ref-chip');
-document.querySelectorAll('.similar').forEach(b => {
-  b.addEventListener('click', e => {
-    e.preventDefault(); e.stopPropagation();
-    refInput.value = b.dataset.id;
-    document.getElementById('ref-name').textContent = b.dataset.name;
-    refChip.classList.remove('hidden');
-    const q = document.getElementById('q');
-    q.focus();
-    if (!q.value.trim()) q.value = 'like this but ';
-    q.setSelectionRange(q.value.length, q.value.length);
+// ── Click a card to open its detail page ──
+// Ignore clicks that land on a button or link inside the card (heart, ✨ similar,
+// view ↗, tags) — those have their own behavior.
+document.querySelectorAll('.card[data-href]').forEach(card => {
+  card.addEventListener('click', e => {
+    if (e.target.closest('a, button')) return;
+    window.location = card.dataset.href;
   });
 });
+
+const refInput = document.getElementById('ref');
+const refChip = document.getElementById('ref-chip');
 const refClear = document.getElementById('ref-clear');
 if (refClear) refClear.addEventListener('click', () => {
   refInput.value = '';
@@ -85,8 +82,30 @@ let ti = 0;
 let history = [];   // {idx, id, prev} per decision, for undo
 let toastTimer = null;
 
+// Photo paging: each row carries `img_positions` (ordered photo indices) and we
+// track which one is showing in `r._pi`. It starts on the representative photo
+// (`img_pos`) so the first thing you see is the same hero shot as the grid.
+function photoCount(r) { return (r.img_positions && r.img_positions.length) || 0; }
+function curPhotoIdx(r) {
+  if (r._pi === undefined) {
+    const k = r.img_positions ? r.img_positions.indexOf(r.img_pos) : -1;
+    r._pi = k >= 0 ? k : 0;
+  }
+  return r._pi;
+}
+function curPhotoPos(r) {
+  const n = photoCount(r);
+  if (!n) return r.img_pos;
+  return r.img_positions[curPhotoIdx(r)];
+}
+
 function cardMarkup(r) {
-  const bg = r.img_pos !== null ? "background-image:url('/img/" + r.listing_id + "/" + r.img_pos + "')" : "";
+  const pos = curPhotoPos(r);
+  const bg = (pos !== null && pos !== undefined) ? "background-image:url('/img/" + r.listing_id + "/" + pos + "')" : "";
+  const n = photoCount(r);
+  const counter = n > 1
+    ? '<span class="t-photo-count">' + (curPhotoIdx(r) + 1) + ' / ' + n + '</span>'
+    : '';
   const badge = r.pct_diff < 0
     ? '<span class="t-badge good">' + Math.round(-r.pct_diff*100) + '% below model · save $' + r.delta.toLocaleString() + '/mo</span>'
     : '<span class="t-badge bad">' + Math.round(r.pct_diff*100) + '% above model</span>';
@@ -97,7 +116,9 @@ function cardMarkup(r) {
     ? '<div class="t-tags">' + r.tags.slice(0, 6).map(
         t => '<span class="t-tag">' + t.replace(/_/g, ' ') + '</span>').join('') + '</div>'
     : '';
-  return '<div class="t-photo" style="' + bg + '"></div>' +
+  return '<div class="t-photo" style="' + bg + '">' + counter +
+      '<span class="t-nav-hint left">‹</span><span class="t-nav-hint right">›</span>' +
+    '</div>' +
     '<span class="stamp like">LIKE</span><span class="stamp pass">NOPE</span>' +
     '<div class="t-info">' + badge +
       '<div class="t-addr">' + r.name + '</div>' +
@@ -170,35 +191,59 @@ function flyTop(dir) {                            // dir: 1 = like/right, -1 = p
   setTimeout(() => decide(dir > 0 ? 'liked' : 'passed'), 230);
 }
 
+// Page to another photo of the SAME listing and update the card in place
+// (no full re-render, so the drag handlers on the card stay attached).
+function navPhoto(el, r, dir) {
+  const n = photoCount(r);
+  if (n < 2) return;
+  const next = curPhotoIdx(r) + dir;
+  if (next < 0 || next >= n) return;             // clamp at the ends, no wrap
+  r._pi = next;
+  const photo = el.querySelector('.t-photo');
+  if (photo) photo.style.backgroundImage =
+    "url('/img/" + r.listing_id + "/" + r.img_positions[r._pi] + "')";
+  const cnt = el.querySelector('.t-photo-count');
+  if (cnt) cnt.textContent = (r._pi + 1) + ' / ' + n;
+}
+
 function attachDrag(el) {
-  let sx = 0, sy = 0, dx = 0, dragging = false;
+  let sx = 0, sy = 0, dx = 0, dragging = false, moved = 0;
   const like = el.querySelector('.stamp.like');
   const pass = el.querySelector('.stamp.pass');
   el.addEventListener('pointerdown', e => {
-    dragging = true; sx = e.clientX; sy = e.clientY; dx = 0;
+    dragging = true; sx = e.clientX; sy = e.clientY; dx = 0; moved = 0;
     el.setPointerCapture(e.pointerId); el.style.transition = 'none';
   });
   el.addEventListener('pointermove', e => {
     if (!dragging) return;
     dx = e.clientX - sx; const dy = e.clientY - sy;
+    moved = Math.max(moved, Math.hypot(dx, dy));
     el.style.transform = 'translate(' + dx + 'px,' + dy + 'px) rotate(' + (dx / 18) + 'deg)';
     if (like) like.style.opacity = Math.max(0, Math.min(1, dx / 110));
     if (pass) pass.style.opacity = Math.max(0, Math.min(1, -dx / 110));
   });
-  function end() {
+  function snapBack() {
+    el.style.transition = 'transform .25s';
+    el.style.transform = '';
+    if (like) like.style.opacity = 0;
+    if (pass) pass.style.opacity = 0;
+  }
+  function end(e) {
     if (!dragging) return;
     dragging = false;
     if (dx > 110) { flyTop(1); }
     else if (dx < -110) { flyTop(-1); }
-    else {
-      el.style.transition = 'transform .25s';
-      el.style.transform = '';
-      if (like) like.style.opacity = 0;
-      if (pass) pass.style.opacity = 0;
+    else if (moved < 8 && e) {
+      // A tap (not a drag): left half → previous photo, right half → next.
+      const rect = el.getBoundingClientRect();
+      navPhoto(el, DECK[ti], (e.clientX - rect.left) < rect.width / 2 ? -1 : 1);
+      snapBack();
+    } else {
+      snapBack();
     }
   }
   el.addEventListener('pointerup', end);
-  el.addEventListener('pointercancel', end);
+  el.addEventListener('pointercancel', () => end(null));
 }
 
 function openTinder() {

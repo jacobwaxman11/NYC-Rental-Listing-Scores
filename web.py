@@ -213,10 +213,14 @@ def _building_groups(conn, listing_ids: list[str]) -> list[str]:
     return [slug.get(i, i) for i in listing_ids]
 
 
-def _choose_image_position(conn, listing_id: str):
+def _choose_image_position(conn, listing_id: str, images=None):
     """Pick a representative photo: the brightest apartment shot, else the
-    first non-irrelevant photo, else the first photo. Returns a position or None."""
-    images = dbm.get_listing_images(conn, listing_id)
+    first non-irrelevant photo, else the first photo. Returns a position or None.
+
+    ``images`` may be passed in to reuse an already-fetched image list (the
+    suggestions loop does this to avoid a second query per listing)."""
+    if images is None:
+        images = dbm.get_listing_images(conn, listing_id)
     if not images:
         return None
     scores = dbm.get_existing_image_scores(conn, [im["image_url"] for im in images])
@@ -278,6 +282,12 @@ def build_suggestions(db_path: str) -> dict:
             ).fetchone()
             scores_row = dict(scores_row) if scores_row else None
 
+            # Fetch images once and reuse: pick a representative photo to show
+            # first, and hand the full ordered position list to the UI so the
+            # Tinder card can page left/right through every photo.
+            images = dbm.get_listing_images(conn, listing_id)
+            img_positions = [im["position"] for im in images]
+
             actual = float(actual_rent[i])
             predicted = float(pred_rent[i])
             pct_diff = (actual - predicted) / predicted if predicted else 0.0
@@ -296,7 +306,8 @@ def build_suggestions(db_path: str) -> dict:
                 "delta": round(predicted - actual),  # positive = below market
                 "apt_quality": _apt_quality(scores_row),
                 "photos": (scores_row or {}).get("photos_total"),
-                "img_pos": _choose_image_position(conn, listing_id),
+                "img_pos": _choose_image_position(conn, listing_id, images),
+                "img_positions": img_positions,
                 "tags": tags_by_listing.get(listing_id, []),
                 "reaction": None,  # overlaid per-request from the DB
             })
@@ -572,6 +583,52 @@ def match_likes(limit: int = 40):
     return cands[:limit], f"🧭 Matched to your {n} liked listing{'s' if n != 1 else ''}"
 
 
+def _similarity_heuristic(ref: dict, r: dict) -> float:
+    """A 0-ish..~8 similarity score between two listings using only structured
+    fields — the fallback for "more like this" when description embeddings
+    haven't been built yet. Higher = more alike."""
+    s = 0.0
+    if ref.get("neighborhood") not in (None, "—") and r.get("neighborhood") == ref.get("neighborhood"):
+        s += 3.0
+    if ref.get("beds") is not None and r.get("beds") is not None:
+        s += max(0.0, 1.0 - abs(ref["beds"] - r["beds"]))          # exact beds → +1
+    if ref.get("baths") is not None and r.get("baths") is not None:
+        s += max(0.0, 0.5 - 0.5 * abs(ref["baths"] - r["baths"]))
+    if ref.get("rent") and r.get("rent"):
+        diff = abs(ref["rent"] - r["rent"]) / ref["rent"]
+        s += max(0.0, 1.5 * (1 - diff / 0.5))                      # full at equal, 0 at +50%
+    if ref.get("sqft") and r.get("sqft"):
+        diff = abs(ref["sqft"] - r["sqft"]) / ref["sqft"]
+        s += max(0.0, 1.0 * (1 - diff / 0.6))
+    rt, tt = set(ref.get("tags") or []), set(r.get("tags") or [])
+    if rt and tt:
+        s += 2.0 * len(rt & tt) / len(rt | tt)                     # weighted Jaccard on tags
+    return s
+
+
+def similar_to(listing_id: str, limit: int = 40):
+    """Rank listings by similarity to ONE reference listing — the engine behind
+    the "✨ More like this" button. Uses description embeddings when available,
+    otherwise :func:`_similarity_heuristic`. Pure local compute, no model call."""
+    sugg = _STATE["suggestions"]
+    ref = next((r for r in sugg if r["listing_id"] == listing_id), None)
+    if ref is None:
+        return [], "⚠ That listing isn't in the current set"
+
+    emb = _STATE["embeddings"]
+    cands = [r for r in sugg
+             if r["listing_id"] != listing_id and r["reaction"] != "passed"]
+
+    if emb and listing_id in emb:
+        rv = emb[listing_id]
+        cands = [r for r in cands if r["listing_id"] in emb]
+        cands.sort(key=lambda r: float(np.dot(rv, emb[r["listing_id"]])), reverse=True)
+    else:
+        cands.sort(key=lambda r: _similarity_heuristic(ref, r), reverse=True)
+
+    return cands[:limit], f"✨ More like {ref['name']}"
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 
@@ -602,6 +659,7 @@ def index():
     ref = request.args.get("ref", "").strip()
     tag = request.args.get("tag", "").strip()
     match = request.args.get("match", "").strip()
+    similar = request.args.get("similar", "").strip()
     ai = _STATE["ai"]
     ref_name = ""
     if ref:
@@ -620,6 +678,10 @@ def index():
         except Exception as e:  # model/parse failure — surface it, show nothing
             rows = []
             ai_banner = f"⚠ AI search failed: {e}"
+    elif similar:
+        # "More like this" — local similarity to one reference listing.
+        searching = True
+        rows, ai_banner = similar_to(similar)
     elif match == "likes":
         # Taste matching — pure local vector math, no model call.
         searching = True
@@ -662,6 +724,34 @@ def index():
         ai_enabled=ai["enabled"], ai_provider=ai["provider"],
         ai_model=ai["model"], ai_banner=ai_banner,
         emb_ready=bool(_STATE["embeddings"]),
+    )
+
+
+@app.route("/listing/<listing_id>")
+def listing_detail(listing_id: str):
+    """Full consumer-style detail page: gallery, description, amenities, map,
+    model price vs. asking, and a 'more like this' jump-off."""
+    if not _STATE["suggestions"]:
+        _STATE.update(build_suggestions(_STATE["db_path"]))
+        _STATE["embeddings"] = _load_embeddings(_STATE["db_path"])
+
+    # The model-derived fields (predicted rent, % vs model, photo quality, tags)
+    # live on the in-memory suggestion row; the rest comes straight from the DB.
+    srow = next((r for r in _STATE["suggestions"] if r["listing_id"] == listing_id), None)
+    with dbm.open_db(_STATE["db_path"]) as conn:
+        listing = dbm.get_listing(conn, listing_id)
+        if not listing:
+            abort(404)
+        amenities = dbm.get_amenities(conn, listing_id)
+        images = dbm.get_listing_images(conn, listing_id)
+        reaction = dbm.get_reactions(conn).get(listing_id)
+
+    positions = [im["position"] for im in images]
+    tags = srow.get("tags", []) if srow else []
+    return render_template(
+        "listing.html",
+        l=listing, s=srow, amenities=amenities, positions=positions,
+        tags=tags, reaction=reaction,
     )
 
 

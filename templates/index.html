@@ -87,7 +87,7 @@
 {% else %}
   <main>
   {% for r in rows %}
-    <div class="card">
+    <div class="card" data-href="/listing/{{ r.listing_id }}">
       <div class="photo" {% if r.img_pos is not none %}style="background-image:url('/img/{{ r.listing_id }}/{{ r.img_pos }}')"{% endif %}>
         <button class="heart {{ 'on' if r.reaction == 'liked' }}" data-id="{{ r.listing_id }}" title="Save">♥</button>
         {% if show == 'passed' %}<button class="undo" data-id="{{ r.listing_id }}" title="Restore">↩</button>{% endif %}
@@ -117,7 +117,7 @@
           <span>photo quality: <span class="q">{{ r.apt_quality if r.apt_quality is not none else '—' }}</span>/10
             {% if r.photos %}· {{ r.photos }} photos{% endif %}</span>
           <span class="foot-actions">
-            {% if ai_enabled %}<button class="similar" data-id="{{ r.listing_id }}" data-name="{{ r.name }}" title="Find similar with AI">✨ similar</button>{% endif %}
+            <a class="similar" href="/?similar={{ r.listing_id }}" title="Find similar listings">✨ similar</a>
             {% if r.url %}<a class="view" href="{{ r.url }}" target="_blank" rel="noopener">view ↗</a>{% endif %}
           </span>
         </div>
@@ -139,7 +139,7 @@
     <button class="t-btn pass" id="t-pass" title="Pass (←)">✕</button>
     <button class="t-btn like" id="t-like" title="Like (→)">♥</button>
   </div>
-  <div class="t-hint">drag the card, use the buttons, or press ← / → · z to undo</div>
+  <div class="t-hint">drag to like/pass · tap photo left/right to flip through photos · ← / → · z to undo</div>
   <div id="t-done" class="t-done hidden">
     <p>That's everything in this view.</p>
     <button id="t-back">← back to grid</button>
