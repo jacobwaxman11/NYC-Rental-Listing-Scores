@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}NYC Rental Deals{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+{% endblock %}
+{% block body %}
+{% macro csel(param, current, options) %}
+<div class="cs" data-param="{{ param }}">
+  <button type="button" class="cs-btn">
+    <span>{{ options[current] if current in options else (options.values()|list)[0] }}</span><i>▾</i>
+  </button>
+  <ul class="cs-menu">
+    {% for val, label in options.items() %}
+      <li data-value="{{ val }}" class="{{ 'sel' if val == current }}">{{ label }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endmacro %}
+
+<header>
+  <h1>NYC Rental Deals</h1>
+  <span class="sub">
+    {{ meta.underpriced }} below-model of {{ meta.total }} scored ·
+    {{ liked_total }} ❤ · {{ passed_total }} ✕ ·
+    {{ "out-of-fold (grouped by building)" if meta.cv else "in-sample fit" }}
+  </span>
+  <div class="tools">
+    {{ csel('show', show, {'under':'Underpriced only','all':'All listings','liked':'❤ Liked','passed':'✕ Passed'}) }}
+    {{ csel('sort', sort, {'deal':'Biggest discount','rent_asc':'Rent: low → high','rent_desc':'Rent: high → low','quality':'Photo quality'}) }}
+    {{ csel('beds', min_beds, {'0':'Any beds','1':'1+ bed','2':'2+ bed','3':'3+ bed'}) }}
+
+    <div class="cs" data-param="nh">
+      <button type="button" class="cs-btn"><span>{{ nh if nh else 'All areas' }}</span><i>▾</i></button>
+      <ul class="cs-menu">
+        <li data-value="" class="{{ 'sel' if not nh }}">All areas</li>
+        {% for n in meta.neighborhoods %}
+          <li data-value="{{ n }}" class="{{ 'sel' if nh == n }}">{{ n }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <button class="tinder-open" id="tinder-open" {{ 'disabled' if not rows }}>🔥 Tinder mode</button>
+    <a class="tinder-open match {{ 'disabled' if not (emb_ready and liked_total) }}"
+       href="{{ '/?match=likes' if (emb_ready and liked_total) else '#' }}"
+       title="{{ 'Rank unreviewed listings by similarity to what you liked' if emb_ready else 'Run embed_listings.py first to enable' }}">🧭 Match my likes</a>
+    <a class="refresh" href="/run">⚙ Pipeline</a>
+    <a class="refresh" href="/?refresh=1">↻ recompute</a>
+  </div>
+</header>
+
+<div class="searchbar">
+  <form method="get">
+    <input type="text" name="q" id="q" autocomplete="off" value="{{ q }}"
+           placeholder="Ask AI: “like this but bigger” · “based on what I liked, find ones I haven't reviewed”"
+           {{ 'disabled' if not ai_enabled }}>
+    <input type="hidden" name="ref" id="ref" value="{{ ref }}">
+    <span id="ref-chip" class="chip {{ '' if ref else 'hidden' }}">
+      like: <b id="ref-name">{{ ref_name }}</b>
+      <button type="button" id="ref-clear" title="Clear reference">✕</button>
+    </span>
+    <button type="submit" class="ask" {{ 'disabled' if not ai_enabled }}>Ask AI</button>
+  </form>
+  {% if ai_banner %}
+    <div class="ai-banner">{{ ai_banner }} · {{ rows|length }} result{{ '' if rows|length == 1 else 's' }} · <a href="/">clear</a></div>
+  {% endif %}
+  {% if active_tag and not searching %}
+    <div class="ai-banner">🏷 {{ active_tag.replace('_', ' ') }} · {{ rows|length }} result{{ '' if rows|length == 1 else 's' }} · <a href="/">clear</a></div>
+  {% endif %}
+  {% if not ai_enabled %}
+    <div class="ai-note">AI search is off — start the server with <code>--provider gemini</code>
+      (or <code>anthropic</code>) and set the matching API key in <code>.env</code> to enable.</div>
+  {% endif %}
+</div>
+
+{% if not rows %}
+  <div class="empty">
+    {% if meta.total == 0 %}
+      <p>No scored listings yet. Run the pipeline first:</p>
+      <p><code>python scrape_listings.py</code> →
+         <code>python backfill_details.py</code> →
+         <code>python score_listings.py</code></p>
+      <p>Then reload this page.</p>
+    {% else %}
+      <p>No listings match these filters. Try “All listings” or clearing the area/beds filter.</p>
+    {% endif %}
+  </div>
+{% else %}
+  <main>
+  {% for r in rows %}
+    <div class="card">
+      <div class="photo" {% if r.img_pos is not none %}style="background-image:url('/img/{{ r.listing_id }}/{{ r.img_pos }}')"{% endif %}>
+        <button class="heart {{ 'on' if r.reaction == 'liked' }}" data-id="{{ r.listing_id }}" title="Save">♥</button>
+        {% if show == 'passed' %}<button class="undo" data-id="{{ r.listing_id }}" title="Restore">↩</button>{% endif %}
+      </div>
+      <div class="body">
+        {% if r.pct_diff < 0 %}
+          <span class="badge good">{{ '%.0f'|format(-r.pct_diff*100) }}% below model · save ${{ '{:,}'.format(r.delta) }}/mo</span>
+        {% else %}
+          <span class="badge bad">{{ '%.0f'|format(r.pct_diff*100) }}% above model</span>
+        {% endif %}
+        <div class="addr">{{ r.name }}</div>
+        <div class="meta">
+          {{ r.neighborhood }} ·
+          {{ (r.beds|int) if r.beds is not none else '?' }} bd /
+          {{ r.baths if r.baths is not none else '?' }} ba{% if r.sqft %} · {{ '{:,}'.format(r.sqft) }} ft²{% endif %}
+        </div>
+        {% if r.tags %}
+          <div class="tags">
+            {% for t in r.tags[:6] %}<a class="tag {{ 'active' if t == active_tag }}" href="/?tag={{ t }}">{{ t.replace('_', ' ') }}</a>{% endfor %}
+          </div>
+        {% endif %}
+        <div class="prices">
+          <span class="rent">${{ '{:,}'.format(r.rent) }}</span>
+          <span class="pred">model ${{ '{:,}'.format(r.predicted) }}/mo</span>
+        </div>
+        <div class="foot">
+          <span>photo quality: <span class="q">{{ r.apt_quality if r.apt_quality is not none else '—' }}</span>/10
+            {% if r.photos %}· {{ r.photos }} photos{% endif %}</span>
+          <span class="foot-actions">
+            {% if ai_enabled %}<button class="similar" data-id="{{ r.listing_id }}" data-name="{{ r.name }}" title="Find similar with AI">✨ similar</button>{% endif %}
+            {% if r.url %}<a class="view" href="{{ r.url }}" target="_blank" rel="noopener">view ↗</a>{% endif %}
+          </span>
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+  </main>
+{% endif %}
+
+<!-- Tinder mode -->
+<div id="tinder" class="tinder hidden">
+  <div class="t-head">
+    <span id="t-count"></span>
+    <button id="t-close" title="Close">✕</button>
+  </div>
+  <div id="t-stage" class="t-stage"></div>
+  <div class="t-actions">
+    <button class="t-btn t-undo" id="t-undo" title="Undo (z)" disabled>↩</button>
+    <button class="t-btn pass" id="t-pass" title="Pass (←)">✕</button>
+    <button class="t-btn like" id="t-like" title="Like (→)">♥</button>
+  </div>
+  <div class="t-hint">drag the card, use the buttons, or press ← / → · z to undo</div>
+  <div id="t-done" class="t-done hidden">
+    <p>That's everything in this view.</p>
+    <button id="t-back">← back to grid</button>
+  </div>
+  <div id="t-toast" class="t-toast hidden">
+    <span id="t-toast-msg"></span>
+    <button id="t-toast-undo">Undo</button>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>window.__DECK = {{ rows|tojson }};</script>
+<script src="{{ url_for('static', filename='js/index.js') }}"></script>
+{% endblock %}
