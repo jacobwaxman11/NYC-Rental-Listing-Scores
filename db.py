@@ -129,6 +129,12 @@ CREATE TABLE IF NOT EXISTS listing_scores (
     space_type_counts_json  TEXT,
     aggregated_at           TEXT
 );
+
+CREATE TABLE IF NOT EXISTS listing_reactions (
+    listing_id  TEXT PRIMARY KEY REFERENCES listings(listing_id) ON DELETE CASCADE,
+    reaction    TEXT NOT NULL,   -- 'liked' | 'passed'
+    updated_at  TEXT
+);
 """
 
 
@@ -465,6 +471,38 @@ def upsert_listing_scores(
         """,
         values,
     )
+
+
+# ── reactions (hearts / swipes) ──────────────────────────────────────────────
+
+
+def set_reaction(
+    conn: sqlite3.Connection, listing_id: str, reaction: Optional[str]
+) -> None:
+    """Set or clear a user's reaction to a listing.
+
+    ``reaction`` is 'liked' or 'passed'; pass None (or '' / 'none') to clear it.
+    """
+    if reaction in (None, "", "none"):
+        conn.execute("DELETE FROM listing_reactions WHERE listing_id=?", (listing_id,))
+        return
+    conn.execute(
+        """
+        INSERT INTO listing_reactions (listing_id, reaction, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(listing_id) DO UPDATE SET
+            reaction=excluded.reaction, updated_at=excluded.updated_at
+        """,
+        (listing_id, reaction, _utcnow()),
+    )
+
+
+def get_reactions(conn: sqlite3.Connection) -> dict[str, str]:
+    """Return {listing_id: reaction} for every listing the user has reacted to."""
+    return {
+        r["listing_id"]: r["reaction"]
+        for r in conn.execute("SELECT listing_id, reaction FROM listing_reactions")
+    }
 
 
 # ── DB-level summary (useful for CLI tools) ──────────────────────────────────

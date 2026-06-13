@@ -1,18 +1,26 @@
-"""Score apartment photos with Gemini and persist results to SQLite.
+"""Score apartment photos with Gemini or Claude and persist results to SQLite.
 
 Reads listings (and their image URLs/local paths) from ``rentals.db``, scores
-each unseen image with Gemini, and writes per-image scores + per-listing
-aggregates back into the same DB.
+each unseen image with the chosen vision model, and writes per-image scores +
+per-listing aggregates back into the same DB.
 
-Example:
-    python score_listings.py --max-listings 10 --model gemini-2.5-flash
+Two providers are supported and produce the same score shape, so they can be
+compared head to head:
 
-Requires GOOGLE_API_KEY in the environment (or in a .env file).
+    # Gemini (default)
+    python score_listings.py --provider gemini --model gemini-2.5-flash
+
+    # Claude
+    python score_listings.py --provider anthropic --model claude-opus-4-8
+
+Requires GOOGLE_API_KEY (Gemini) or ANTHROPIC_API_KEY (Claude) in the
+environment, or in a .env file.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import mimetypes
 import os
@@ -22,8 +30,6 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 
 import db as dbm
 
@@ -97,57 +103,151 @@ IMPORTANT: the length of the returned array MUST equal the number of images
 provided. Do not combine, skip, or merge images."""
 
 
-# ── Scorer ───────────────────────────────────────────────────────────────────
+# ── Scorers ──────────────────────────────────────────────────────────────────
+#
+# Each provider implements ``_call(paths) -> str`` (raw model text). The shared
+# ``score_batch`` wrapper parses that text into one score dict per image and
+# pads/truncates so the result always matches the number of images sent.
 
 
-def score_image_batch(
-    paths: list[str],
-    client: genai.Client,
-    model_name: str,
-    timeout_ms: int,
-) -> list[Optional[dict]]:
-    """Send up to N images in one Gemini call and return one score dict per
-    image in the same order. On any failure, returns [None] * len(paths)."""
-    if not paths:
-        return []
+def _loads_lenient(raw: str):
+    """Parse a JSON array out of a model response.
 
+    Gemini is asked for application/json and returns a clean array; Claude
+    usually returns a bare array too. If either wraps the array in markdown
+    fences or a sentence of prose, fall back to the substring between the first
+    ``[`` and the last ``]``."""
     try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        start, end = raw.find("["), raw.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(raw[start:end + 1])
+        raise
+
+
+def _coerce_to_list(parsed, n: int) -> list:
+    """Force a parsed response into exactly ``n`` elements."""
+    if not isinstance(parsed, list):
+        # Model occasionally returns a lone object for a batch-of-one despite
+        # the instructions — tolerate it.
+        parsed = [parsed]
+    if len(parsed) != n:
+        print(f"    ! expected {n} results, got {len(parsed)} — padding with nulls")
+        parsed = list(parsed)[:n] + [None] * max(0, n - len(parsed))
+    return parsed
+
+
+class Scorer:
+    """Base scorer. Subclasses set ``model_name`` and implement ``_call``."""
+
+    model_name: str
+
+    def _call(self, paths: list[str]) -> str:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def score_batch(self, paths: list[str]) -> list[Optional[dict]]:
+        """Send up to N images in one call and return one score dict per image
+        in the same order. On any failure, returns [None] * len(paths)."""
+        if not paths:
+            return []
+        try:
+            raw = self._call(paths)
+            return _coerce_to_list(_loads_lenient(raw), len(paths))
+        except Exception as e:
+            print(f"    ✗ Batch API error: {e}")
+            return [None] * len(paths)
+
+
+class GeminiScorer(Scorer):
+    def __init__(self, model_name: str, timeout_ms: int):
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            raise SystemExit(
+                "GOOGLE_API_KEY not set. Add it to your .env file or export it."
+            )
+        # Imported lazily so the Anthropic-only path doesn't require google-genai.
+        from google import genai
+        from google.genai import types
+
+        self._types = types
+        self.model_name = model_name
+        self._timeout_ms = timeout_ms
+        self._client = genai.Client(api_key=api_key)
+
+    def _call(self, paths: list[str]) -> str:
+        types = self._types
         parts: list = [SCORE_PROMPT]
         for path in paths:
             data = Path(path).read_bytes()
             mime = mimetypes.guess_type(path)[0] or "image/webp"
             parts.append(types.Part.from_bytes(data=data, mime_type=mime))
 
-        response = client.models.generate_content(
-            model=model_name,
+        response = self._client.models.generate_content(
+            model=self.model_name,
             contents=parts,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 response_mime_type="application/json",
-                http_options=types.HttpOptions(timeout=timeout_ms),
+                http_options=types.HttpOptions(timeout=self._timeout_ms),
             ),
         )
+        return response.text
 
-        parsed = json.loads(response.text)
-        if not isinstance(parsed, list):
-            # Model occasionally returns a lone object for batch-of-one despite
-            # the instructions — tolerate it.
-            parsed = [parsed]
 
-        if len(parsed) != len(paths):
-            print(
-                f"    ! expected {len(paths)} results, got {len(parsed)} — "
-                f"padding with nulls"
+class ClaudeScorer(Scorer):
+    # Anthropic accepts JPEG, PNG, GIF, and WebP. Listing photos are usually
+    # WebP, which is what the scraper downloads.
+    _ALLOWED_MEDIA = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
+    def __init__(self, model_name: str, timeout_ms: int, max_tokens: int = 8192):
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise SystemExit(
+                "ANTHROPIC_API_KEY not set. Add it to your .env file or export it."
             )
-            parsed = list(parsed)[: len(paths)] + [None] * max(
-                0, len(paths) - len(parsed)
-            )
+        # Imported lazily so the Gemini-only path doesn't require anthropic.
+        import anthropic
 
-        return parsed
+        self.model_name = model_name
+        self._max_tokens = max_tokens
+        # Anthropic's SDK timeout is in seconds.
+        self._client = anthropic.Anthropic(timeout=timeout_ms / 1000.0)
 
-    except Exception as e:
-        print(f"    ✗ Batch API error: {e}")
-        return [None] * len(paths)
+    def _call(self, paths: list[str]) -> str:
+        blocks: list = [{"type": "text", "text": SCORE_PROMPT}]
+        for path in paths:
+            data = base64.standard_b64encode(Path(path).read_bytes()).decode("utf-8")
+            mime = mimetypes.guess_type(path)[0] or "image/webp"
+            if mime not in self._ALLOWED_MEDIA:
+                mime = "image/jpeg"
+            blocks.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": mime, "data": data},
+            })
+
+        response = self._client.messages.create(
+            model=self.model_name,
+            max_tokens=self._max_tokens,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": blocks}],
+        )
+        # The system prompt constrains output to JSON; concatenate any text
+        # blocks and let _loads_lenient pull the array out.
+        return "".join(b.text for b in response.content if b.type == "text")
+
+
+PROVIDER_DEFAULT_MODELS = {
+    "gemini": "gemini-2.5-flash",
+    "anthropic": "claude-opus-4-8",
+}
+
+
+def build_scorer(provider: str, model_name: str, timeout_ms: int) -> Scorer:
+    if provider == "gemini":
+        return GeminiScorer(model_name, timeout_ms)
+    if provider == "anthropic":
+        return ClaudeScorer(model_name, timeout_ms)
+    raise SystemExit(f"Unknown provider: {provider!r} (expected 'gemini' or 'anthropic')")
 
 
 def aggregate_scores(image_scores: list[Optional[dict]]) -> dict:
@@ -248,10 +348,8 @@ def _log_score(idx: int, total: int, path: str, scores: Optional[dict]) -> None:
 def score_listing(
     conn: sqlite3.Connection,
     listing: dict,
-    client: genai.Client,
-    model_name: str,
+    scorer: Scorer,
     sleep_s: float,
-    timeout_ms: int,
     batch_size: int,
     max_images: int,
 ) -> dict:
@@ -308,12 +406,12 @@ def score_listing(
             f"({len(batch_paths)} image{'s' if len(batch_paths) != 1 else ''})"
         )
 
-        batch_scores = score_image_batch(batch_paths, client, model_name, timeout_ms)
+        batch_scores = scorer.score_batch(batch_paths)
 
         for idx, path, url, scores in zip(batch_idxs, batch_paths, batch_urls, batch_scores):
             raw_scores[idx] = scores
             if scores:
-                dbm.upsert_image_score(conn, url, scores, model_name)
+                dbm.upsert_image_score(conn, url, scores, scorer.model_name)
             _log_score(idx + 1, len(images), path, scores)
 
         # Commit progress after every batch so a crash doesn't lose the API
@@ -365,6 +463,7 @@ def _print_summary(s: dict) -> None:
 
 def run(
     db_path: str,
+    provider: str,
     model_name: str,
     max_listings: Optional[int],
     sleep_s: float,
@@ -375,13 +474,7 @@ def run(
 ) -> None:
     load_dotenv()
 
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        raise SystemExit(
-            "GOOGLE_API_KEY not set. Add it to your .env file or export it."
-        )
-
-    client = genai.Client(api_key=api_key)
+    scorer = build_scorer(provider, model_name, timeout_ms)
 
     with dbm.open_db(db_path) as conn:
         # Pick the queue. ``rescore`` re-aggregates everything (image scores
@@ -398,7 +491,8 @@ def run(
 
         already = dbm.stats(conn)["scored_images"]
         print(
-            f"DB: {db_path} — {already} images already scored, "
+            f"DB: {db_path} — provider={provider} model={model_name} — "
+            f"{already} images already scored, "
             f"{len(queue)} listing{'s' if len(queue) != 1 else ''} queued."
         )
 
@@ -409,10 +503,8 @@ def run(
             summary = score_listing(
                 conn,
                 listing,
-                client,
-                model_name,
+                scorer,
                 sleep_s,
-                timeout_ms,
                 batch_size=batch_size,
                 max_images=max_images,
             )
@@ -427,15 +519,24 @@ def run(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Score apartment photos with Gemini.",
+        description="Score apartment photos with Gemini or Claude.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--db", type=str, default=dbm.DEFAULT_DB_PATH, help="SQLite database path")
     p.add_argument(
+        "--provider",
+        type=str,
+        choices=["gemini", "anthropic"],
+        default="gemini",
+        help="Vision model provider",
+    )
+    p.add_argument(
         "--model",
         type=str,
-        default="gemini-2.5-flash",
-        help="Gemini model name (e.g. gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.5-pro)",
+        default=None,
+        help="Model name. Defaults per provider: gemini-2.5-flash (gemini), "
+             "claude-opus-4-8 (anthropic). Other examples: gemini-2.5-pro, "
+             "claude-haiku-4-5 (cheaper/faster).",
     )
     p.add_argument(
         "--max-listings",
@@ -447,13 +548,13 @@ def parse_args() -> argparse.Namespace:
         "--sleep",
         type=float,
         default=4,
-        help="Seconds to sleep between Gemini batch calls",
+        help="Seconds to sleep between batch calls",
     )
     p.add_argument(
         "--batch-size",
         type=int,
         default=5,
-        help="Number of images to send per Gemini API call",
+        help="Number of images to send per API call",
     )
     p.add_argument(
         "--max-images",
@@ -465,7 +566,7 @@ def parse_args() -> argparse.Namespace:
         "--timeout-ms",
         type=int,
         default=60_000,
-        help="Per-call Gemini HTTP timeout in milliseconds",
+        help="Per-call HTTP timeout in milliseconds",
     )
     p.add_argument(
         "--rescore",
@@ -478,9 +579,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    model_name = args.model or PROVIDER_DEFAULT_MODELS[args.provider]
     run(
         db_path=args.db,
-        model_name=args.model,
+        provider=args.provider,
+        model_name=model_name,
         max_listings=args.max_listings,
         sleep_s=args.sleep,
         timeout_ms=args.timeout_ms,

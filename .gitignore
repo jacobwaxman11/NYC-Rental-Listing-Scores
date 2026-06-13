@@ -1,0 +1,20 @@
+# Virtual environments
+.venv/
+venv/
+
+# Secrets / environment
+.env
+
+# Database (per ReadMe — rebuildable, not tracked)
+rentals.db
+
+# Downloaded listing photos
+images/
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# IDE
+.idea/

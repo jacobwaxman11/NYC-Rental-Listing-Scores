@@ -1,7 +1,7 @@
 # NYCRentalRankings
 
-Scrape StreetEasy rental listings, score their photos with Gemini, and use
-regression models to identify mispriced apartments.
+Scrape StreetEasy rental listings, score their photos with Gemini **or Claude**,
+and use regression models to identify mispriced apartments.
 
 ## Storage
 
@@ -33,7 +33,26 @@ python backfill_details.py --max-listings 50
 python score_listings.py  --max-listings 50
 ```
 
-Set `GOOGLE_API_KEY` in a `.env` file before running the scorer.
+### Photo scoring provider
+
+`score_listings.py` can score photos with either Gemini or Claude. Both produce
+the **same** score shape (see `image_scores` table), so you can run one set of
+images through each and compare. The provider/model that scored each image is
+recorded in `image_scores.model`, and already-scored images are skipped
+regardless of which provider produced them.
+
+```bash
+# Gemini (default)
+python score_listings.py --provider gemini   --model gemini-2.5-flash
+
+# Claude — default model is claude-opus-4-8; claude-haiku-4-5 is cheaper/faster
+python score_listings.py --provider anthropic --model claude-opus-4-8
+python score_listings.py --provider anthropic --model claude-haiku-4-5
+```
+
+Set the matching key in a `.env` file before running the scorer:
+`GOOGLE_API_KEY` for `--provider gemini`, `ANTHROPIC_API_KEY` for
+`--provider anthropic`.
 
 ## Building the training frame
 
@@ -85,6 +104,26 @@ Key design decisions:
   same building don't appear in both train and test)
 - **StandardScaler** inside the pipeline (refit per CV fold)
 - Models are compared across raw (v1) and compressed (v2) feature sets
+
+## Web UI
+
+[`web.py`](web.py) is a small Flask front-end that serves the listings the
+model flags as underpriced. It builds the feature frame, predicts each
+listing's "market" rent with **out-of-fold** Ridge predictions grouped by
+building (the same leakage guard as the notebook), and ranks listings by how
+far their actual rent sits below the prediction.
+
+```bash
+python web.py                       # http://127.0.0.1:5000
+python web.py --db rentals.db --port 8000
+```
+
+Each card shows a representative photo (the brightest apartment shot), the
+actual rent vs. the model's predicted rent, the % below/above market, and the
+Gemini/Claude photo-quality score. Filter by area / beds, sort by discount or
+quality, and toggle "Underpriced only" vs. "All listings". Suggestions are
+cached at startup; hit `/?refresh=1` after re-running the scorer. Requires a
+populated `rentals.db` (run the scrape → backfill → score pipeline first).
 
 ## To do
 
