@@ -142,6 +142,15 @@ CREATE TABLE IF NOT EXISTS listing_reactions (
     reaction    TEXT NOT NULL,   -- 'liked' | 'passed'
     updated_at  TEXT
 );
+
+CREATE TABLE IF NOT EXISTS listing_embeddings (
+    listing_id   TEXT PRIMARY KEY REFERENCES listings(listing_id) ON DELETE CASCADE,
+    model        TEXT,
+    dim          INTEGER,
+    text_hash    TEXT,            -- hash of (model, profile text) to skip re-embeds
+    vector       TEXT,            -- JSON array of floats
+    embedded_at  TEXT
+);
 """
 
 
@@ -543,6 +552,42 @@ def get_reactions(conn: sqlite3.Connection) -> dict[str, str]:
     return {
         r["listing_id"]: r["reaction"]
         for r in conn.execute("SELECT listing_id, reaction FROM listing_reactions")
+    }
+
+
+# ── embeddings ───────────────────────────────────────────────────────────────
+
+
+def upsert_embedding(
+    conn: sqlite3.Connection,
+    listing_id: str,
+    model: str,
+    vector: list[float],
+    text_hash: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO listing_embeddings
+            (listing_id, model, dim, text_hash, vector, embedded_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (listing_id, model, len(vector), text_hash, json.dumps(vector), _utcnow()),
+    )
+
+
+def get_embedding_hashes(conn: sqlite3.Connection) -> dict[str, str]:
+    """{listing_id: text_hash} for already-embedded listings (incremental skip)."""
+    return {
+        r["listing_id"]: r["text_hash"]
+        for r in conn.execute("SELECT listing_id, text_hash FROM listing_embeddings")
+    }
+
+
+def get_all_embeddings(conn: sqlite3.Connection) -> dict[str, list[float]]:
+    """{listing_id: vector} for every embedded listing."""
+    return {
+        r["listing_id"]: json.loads(r["vector"])
+        for r in conn.execute("SELECT listing_id, vector FROM listing_embeddings")
     }
 
 
