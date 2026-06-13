@@ -39,6 +39,55 @@ SYSTEM_PROMPT = (
     "apartments. Be precise and return only valid JSON."
 )
 
+
+# Controlled descriptive-tag vocabulary for apartment photos. Tags power search
+# and indexing in the web UI, so they are constrained to this fixed list (the
+# model is told to choose only from these, and the scorer drops anything else).
+TAG_GROUPS = {
+    "Light & windows": [
+        "bright", "sun_filled", "lots_of_windows", "floor_to_ceiling_windows",
+        "large_windows", "corner_unit", "dim", "no_windows",
+    ],
+    "Layout": [
+        "duplex", "loft", "open_floor_plan", "railroad_layout", "split_bedroom",
+        "internal_stairs", "high_ceilings", "low_ceilings", "sunken_living_room",
+        "separate_dining_room", "home_office_space", "walk_in_closet",
+        "ample_closets", "narrow_rooms", "spacious", "cramped",
+        "windowed_kitchen", "windowed_bathroom",
+    ],
+    "Kitchen": [
+        "open_kitchen", "galley_kitchen", "eat_in_kitchen", "renovated_kitchen",
+        "dated_kitchen", "stainless_appliances", "dishwasher", "gas_stove",
+        "kitchen_island", "breakfast_bar", "stone_counters", "ample_cabinets",
+    ],
+    "Bathroom": [
+        "renovated_bathroom", "dated_bathroom", "double_vanity", "soaking_tub",
+        "walk_in_shower", "marble_bathroom",
+    ],
+    "Floors & finishes": [
+        "hardwood_floors", "tile_floors", "carpet", "exposed_brick",
+        "crown_molding", "decorative_fireplace", "working_fireplace",
+        "recessed_lighting", "exposed_beams", "original_prewar_details",
+        "modern_finishes", "luxury_finishes", "builder_grade_finishes",
+    ],
+    "Private outdoor": [
+        "private_balcony", "private_terrace", "private_backyard",
+        "private_patio", "juliet_balcony", "roof_access",
+    ],
+    "Condition & style": [
+        "newly_renovated", "gut_renovated", "well_maintained", "needs_renovation",
+        "prewar_charm", "modern_building", "staged", "furnished", "empty",
+    ],
+    "Views": [
+        "skyline_view", "water_view", "park_view", "open_city_view",
+        "courtyard_view", "brick_wall_view", "obstructed_view",
+    ],
+}
+APARTMENT_TAGS = tuple(t for group in TAG_GROUPS.values() for t in group)
+VALID_TAGS = set(APARTMENT_TAGS)
+TAG_TEXT = "\n".join(f"  {name}: {', '.join(tags)}" for name, tags in TAG_GROUPS.items())
+
+
 SCORE_PROMPT = """You will receive one or more listing photos in a single request.
 For EACH image, classify it, then score it.
 
@@ -51,7 +100,8 @@ Each array element MUST have this exact shape:
   "image_category": "apartment" | "common_space" | "irrelevant",
   "apartment_scores": { ... } | null,
   "common_space_scores": { ... } | null,
-  "irrelevant_reason": "..." | null
+  "irrelevant_reason": "..." | null,
+  "tags": [ ... ]
 }
 
 Classification rules:
@@ -99,6 +149,12 @@ Scoring guide (common_space):
 - condition: 1=worn/dirty, 10=pristine
 - appeal: 1=uninviting/cramped, 10=impressive/desirable amenity
 
+Tags (apartment images only): add a "tags" array of descriptive keywords chosen
+ONLY from the controlled vocabulary below. Include a tag only when it is clearly
+visible in the photo; omit anything uncertain. Use [] for common_space and
+irrelevant images, and never invent tags outside this list:
+""" + TAG_TEXT + """
+
 IMPORTANT: the length of the returned array MUST equal the number of images
 provided. Do not combine, skip, or merge images."""
 
@@ -124,6 +180,13 @@ def _loads_lenient(raw: str):
         if start != -1 and end != -1 and end > start:
             return json.loads(raw[start:end + 1])
         raise
+
+
+def _clean_tags(raw) -> list:
+    """Keep only known vocabulary tags, de-duplicated and order-preserved."""
+    if not isinstance(raw, list):
+        return []
+    return [t for t in dict.fromkeys(raw) if t in VALID_TAGS]
 
 
 def _coerce_to_list(parsed, n: int) -> list:
@@ -153,7 +216,11 @@ class Scorer:
             return []
         try:
             raw = self._call(paths)
-            return _coerce_to_list(_loads_lenient(raw), len(paths))
+            results = _coerce_to_list(_loads_lenient(raw), len(paths))
+            for s in results:
+                if isinstance(s, dict):
+                    s["tags"] = _clean_tags(s.get("tags"))
+            return results
         except Exception as e:
             print(f"    ✗ Batch API error: {e}")
             return [None] * len(paths)

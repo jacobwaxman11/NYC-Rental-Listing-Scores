@@ -54,6 +54,14 @@ Set the matching key in a `.env` file before running the scorer:
 `GOOGLE_API_KEY` for `--provider gemini`, `ANTHROPIC_API_KEY` for
 `--provider anthropic`.
 
+In the same call, each apartment photo is also tagged with descriptive keywords
+from a controlled ~80-term vocabulary (`hardwood_floors`, `exposed_brick`,
+`duplex`, `high_ceilings`, `private_balcony`, `windowed_kitchen`, …; see
+`TAG_GROUPS` in [`score_listings.py`](score_listings.py)). Tags are stored in the
+`image_tags` table and rolled up per listing, powering tag chips and AI-search
+filters in the web UI. No extra API call — the tags come back in the scoring
+response.
+
 ## Building the training frame
 
 `features.py` joins `listings` ⨝ `listing_scores` ⨝ pivoted `listing_amenities`
@@ -121,9 +129,29 @@ python web.py --db rentals.db --port 8000
 Each card shows a representative photo (the brightest apartment shot), the
 actual rent vs. the model's predicted rent, the % below/above market, and the
 Gemini/Claude photo-quality score. Filter by area / beds, sort by discount or
-quality, and toggle "Underpriced only" vs. "All listings". Suggestions are
-cached at startup; hit `/?refresh=1` after re-running the scorer. Requires a
-populated `rentals.db` (run the scrape → backfill → score pipeline first).
+quality, and toggle Underpriced / All / ❤ Liked / ✕ Passed views. You can ❤
+listings and triage them in **Tinder mode** (swipe / arrow keys, with undo) —
+both persist to the `listing_reactions` table. Suggestions are cached at
+startup; hit `/?refresh=1` after re-running the scorer. Requires a populated
+`rentals.db` (run the scrape → backfill → score pipeline first).
+
+### AI search
+
+Pass a model provider to enable natural-language search over the listings:
+
+```bash
+python web.py --provider anthropic --model claude-opus-4-8   # or --provider gemini
+```
+
+Ask things like *"like this but bigger"* (click ✨ on a card to set it as the
+reference) or *"based on what I've liked, find similar ones I haven't reviewed"*.
+**Cost is one small call per distinct question:** the model never sees the full
+listing set — it only receives compact facets + the reference + a profile of
+your likes, and returns a structured filter/ranking plan that the app executes
+locally. Plans are cached per (query, reference, likes), so repeats are free.
+Use `--model claude-haiku-4-5` (or `gemini-2.5-flash`) for the cheapest calls.
+Needs `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY` in `.env`; without it the UI runs
+normally with AI search disabled.
 
 ## To do
 
