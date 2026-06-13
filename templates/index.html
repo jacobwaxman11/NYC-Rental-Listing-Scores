@@ -2,6 +2,9 @@
 {% block title %}StreetEasier{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+<!-- Leaflet (mini-map preview inside Tinder cards) — no API key required -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 {% endblock %}
 {% block body %}
 {% macro csel(param, current, options) %}
@@ -88,7 +91,7 @@
   <main>
   {% for r in rows %}
     <div class="card" data-href="/listing/{{ r.listing_id }}">
-      <div class="photo" {% if r.img_pos is not none %}style="background-image:url('/img/{{ r.listing_id }}/{{ r.img_pos }}')"{% endif %}>
+      <div class="photo" data-id="{{ r.listing_id }}" {% if r.img_pos is not none %}style="background-image:url('/img/{{ r.listing_id }}/{{ r.img_pos }}')"{% endif %}>
         <button class="heart {{ 'on' if r.reaction == 'liked' }}" data-id="{{ r.listing_id }}" title="Save">♥</button>
         {% if show == 'passed' %}<button class="undo" data-id="{{ r.listing_id }}" title="Restore">↩</button>{% endif %}
       </div>
@@ -151,6 +154,8 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>window.__DECK = {{ rows|tojson }};</script>
 <script src="{{ url_for('static', filename='js/index.js') }}"></script>
 {% endblock %}

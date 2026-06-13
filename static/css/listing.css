@@ -55,7 +55,9 @@
        font-weight:650; cursor:pointer; text-decoration:none; border:1px solid var(--line);
        background:var(--card); color:var(--txt); }
 .act.heart.on { color:var(--heart); border-color:var(--heart); }
+.act.pass.on { color:var(--bad); border-color:var(--bad); }
 .act.primary { background:linear-gradient(135deg,#60a5fa,#34d399); color:#06281f; border:none; }
+.act.wide { width:100%; display:block; box-sizing:border-box; }
 
 /* Content blocks */
 .block { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px; }

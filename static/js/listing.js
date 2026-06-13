@@ -49,18 +49,36 @@ if (mapEl && window.L) {
   }
 }
 
-// ── Save (heart) ──
+// ── Like / Pass ──
+// Like and pass are mutually exclusive — the backend stores a single reaction,
+// so we just repaint both buttons from whatever it returns.
 const heart = document.getElementById('d-heart');
-if (heart) heart.addEventListener('click', async () => {
-  const on = heart.classList.contains('on');
+const passBtn = document.getElementById('d-pass');
+
+function paintActions(reaction) {
+  if (heart) {
+    const on = reaction === 'liked';
+    heart.classList.toggle('on', on);
+    const s = heart.querySelector('span'); if (s) s.textContent = on ? 'Saved' : 'Save';
+  }
+  if (passBtn) {
+    const on = reaction === 'passed';
+    passBtn.classList.toggle('on', on);
+    const s = passBtn.querySelector('span'); if (s) s.textContent = on ? 'Passed' : 'Pass';
+  }
+}
+
+async function setReaction(id, reaction) {
   const res = await fetch('/api/react', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ listing_id: heart.dataset.id, reaction: on ? 'none' : 'liked' }),
+    body: JSON.stringify({ listing_id: id, reaction }),
   });
   const out = await res.json();
-  const liked = out.reaction === 'liked';
-  heart.classList.toggle('on', liked);
-  const label = heart.querySelector('span');
-  if (label) label.textContent = liked ? 'Saved' : 'Save';
-});
+  paintActions(out.reaction);
+}
+
+if (heart) heart.addEventListener('click', () =>
+  setReaction(heart.dataset.id, heart.classList.contains('on') ? 'none' : 'liked'));
+if (passBtn) passBtn.addEventListener('click', () =>
+  setReaction(passBtn.dataset.id, passBtn.classList.contains('on') ? 'none' : 'passed'));

@@ -296,6 +296,8 @@ def build_suggestions(db_path: str) -> dict:
                 "listing_id": listing_id,
                 "name": listing.get("name") or listing.get("street") or listing_id,
                 "neighborhood": listing.get("neighborhood") or "—",
+                "lat": listing.get("lat"),
+                "lng": listing.get("lng"),
                 "beds": listing.get("beds"),
                 "baths": listing.get("baths"),
                 "sqft": listing.get("sqft"),
