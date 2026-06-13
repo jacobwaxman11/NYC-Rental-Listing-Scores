@@ -8,7 +8,8 @@
             zoom + scroll). Children can only further restrict, not re-enable. */
          touch-action:manipulation; }
   header { padding:20px 28px; border-bottom:1px solid var(--line);
-           display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+           display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+           position:sticky; top:0; z-index:50; background:var(--bg); }
   h1 { font-size:20px; margin:0; font-weight:650; }
   .sub { color:var(--muted); font-size:13px; }
   .tools { margin-left:auto; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
