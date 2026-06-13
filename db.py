@@ -130,6 +130,13 @@ CREATE TABLE IF NOT EXISTS listing_scores (
     aggregated_at           TEXT
 );
 
+CREATE TABLE IF NOT EXISTS image_tags (
+    image_url  TEXT NOT NULL REFERENCES image_scores(image_url) ON DELETE CASCADE,
+    tag        TEXT NOT NULL,
+    PRIMARY KEY (image_url, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags(tag);
+
 CREATE TABLE IF NOT EXISTS listing_reactions (
     listing_id  TEXT PRIMARY KEY REFERENCES listings(listing_id) ON DELETE CASCADE,
     reaction    TEXT NOT NULL,   -- 'liked' | 'passed'
@@ -385,6 +392,40 @@ def upsert_image_score(
             _utcnow(),
         ),
     )
+
+    # Replace the image's descriptive tags (controlled-vocabulary keywords).
+    conn.execute("DELETE FROM image_tags WHERE image_url=?", (image_url,))
+    tags = score.get("tags") or []
+    if tags:
+        conn.executemany(
+            "INSERT OR IGNORE INTO image_tags (image_url, tag) VALUES (?, ?)",
+            [(image_url, t) for t in tags],
+        )
+
+
+def get_all_listing_tags(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    """Roll image tags up to the listing level via listing_images.
+
+    Returns {listing_id: [tag, ...]} ordered by how many of the listing's photos
+    carry each tag (most frequent first). A tag on a shared image counts once
+    per listing that references it.
+    """
+    rows = conn.execute(
+        """
+        SELECT li.listing_id AS listing_id, it.tag AS tag, COUNT(*) AS n
+        FROM listing_images li
+        JOIN image_tags it ON li.image_url = it.image_url
+        GROUP BY li.listing_id, it.tag
+        """
+    ).fetchall()
+
+    acc: dict[str, list[tuple[str, int]]] = {}
+    for r in rows:
+        acc.setdefault(r["listing_id"], []).append((r["tag"], r["n"]))
+    return {
+        lid: [t for t, _ in sorted(pairs, key=lambda p: (-p[1], p[0]))]
+        for lid, pairs in acc.items()
+    }
 
 
 def image_score_to_dict(row: dict) -> dict:
