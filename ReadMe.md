@@ -92,4 +92,8 @@ Key design decisions:
 - Add building table to the DB
 - `listing_snapshots` table to track price and status changes over time
 - Explore non-linear models (gradient boosted trees) once dataset grows
+<<<<<<< HEAD
 - Target encoding for neighborhoods as an alternative to one-hot
+=======
+- Target encoding for neighborhoods as an alternative to one-hot
+>>>>>>> 2bb502a (Initial local state)

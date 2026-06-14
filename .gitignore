@@ -1,0 +1,15 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+images/
+rentals.db
+rentals.db-journal
+rentals.db-wal
+rentals.db-shm
+listings.json
+listings_scored.json
+image_scores_cache.json
+.DS_Store
