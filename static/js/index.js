@@ -235,7 +235,7 @@ document.querySelectorAll('.card[data-href] .photo[data-id]').forEach(photo => {
   paint();
 
   photo.addEventListener('click', e => {
-    if (e.target.closest('.heart, .undo')) return;    // let those buttons work
+    if (e.target.closest('.heart, .undo, .card-pass')) return;  // let those buttons work
     const rect = photo.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     if (x < 0.34) { e.stopPropagation(); gi = (gi - 1 + positions.length) % positions.length; paint(); }
