@@ -203,6 +203,23 @@ def get_amenities(conn: sqlite3.Connection, listing_id: str) -> list[str]:
     ]
 
 
+def get_all_listing_amenities(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    """Return {listing_id: [amenity, ...]} for every listing with amenities.
+
+    The bulk counterpart to :func:`get_amenities` — used to attach the
+    StreetEasy-scraped amenities (pool, washer_dryer, gym, dishwasher, …) to the
+    web UI's suggestion rows for amenity chips and search, alongside (and kept
+    distinct from) the vision-derived photo tags.
+    """
+    rows = conn.execute(
+        "SELECT listing_id, amenity FROM listing_amenities ORDER BY listing_id, amenity"
+    ).fetchall()
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        out.setdefault(r["listing_id"], []).append(r["amenity"])
+    return out
+
+
 # ── images ───────────────────────────────────────────────────────────────────
 
 

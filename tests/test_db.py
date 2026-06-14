@@ -49,6 +49,19 @@ def test_image_tags_rollup_and_replace(tmp_path):
         assert set(tags["L2"]) == {"hardwood_floors", "exposed_brick"}  # untouched
 
 
+def test_get_all_listing_amenities(tmp_path):
+    with dbm.open_db(str(tmp_path / "am.db")) as conn:
+        _seed(conn)
+        dbm.set_amenities(conn, "L1", ["pool", "washer_dryer", "gym"])
+        dbm.set_amenities(conn, "L2", ["dishwasher"])
+        allam = dbm.get_all_listing_amenities(conn)
+        assert allam["L1"] == ["gym", "pool", "washer_dryer"]   # sorted
+        assert allam["L2"] == ["dishwasher"]
+        # set_amenities replaces; a listing with none isn't in the dict
+        dbm.set_amenities(conn, "L1", [])
+        assert "L1" not in dbm.get_all_listing_amenities(conn)
+
+
 def test_embeddings_roundtrip_and_replace(tmp_path):
     with dbm.open_db(str(tmp_path / "e.db")) as conn:
         _seed(conn, ids=("L1",))
