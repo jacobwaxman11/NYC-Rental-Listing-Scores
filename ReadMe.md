@@ -57,7 +57,7 @@ Set the matching key in a `.env` file before running the scorer:
 In the same call, each apartment photo is also tagged with descriptive keywords
 from a controlled ~80-term vocabulary (`hardwood_floors`, `exposed_brick`,
 `duplex`, `high_ceilings`, `private_balcony`, `windowed_kitchen`, …; see
-`TAG_GROUPS` in [`score_listings.py`](score_listings.py)). Tags are stored in the
+`TAG_GROUPS` in [`tags.py`](tags.py)). Tags are stored in the
 `image_tags` table and rolled up per listing, powering tag chips and AI-search
 filters in the web UI. No extra API call — the tags come back in the scoring
 response.
