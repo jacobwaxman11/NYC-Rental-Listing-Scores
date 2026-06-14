@@ -9,7 +9,13 @@
 
 .detail { max-width:1080px; margin:0 auto; padding:22px;
           display:grid; grid-template-columns:1.6fr 1fr; gap:22px; align-items:start; }
-.detail > .block, .detail > .map-block { grid-column:1 / -1; }
+/* Gallery + content blocks live in the main (left) column. The summary spans
+   the full height of the right column so its sticky behaviour follows you as
+   you scroll the description and map — not just the gallery row (which made it
+   look frozen/static). */
+.detail > .gallery { grid-column:1; }
+.detail > .summary { grid-column:2; grid-row:1 / span 99; }
+.detail > .block, .detail > .map-block { grid-column:1; }
 /* Grid items default to min-width:auto, so a long unbreakable word (e.g. a URL
    in the description) would force a track wider than the viewport and require
    zooming out. Letting items shrink to 0 keeps the page at viewport width. */
@@ -81,5 +87,7 @@
 
 @media (max-width:760px) {
   .detail { grid-template-columns:1fr; padding:14px; }
-  .summary { position:static; }
+  /* Single column: summary flows back into place (right after the gallery) and
+     stops sticking. */
+  .detail > .summary { grid-column:1; grid-row:auto; position:static; }
 }
