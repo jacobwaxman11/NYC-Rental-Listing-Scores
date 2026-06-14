@@ -194,10 +194,31 @@ function cardMarkup(r) {
       '<div class="t-addr">' + r.name + '</div>' +
       '<div class="t-meta">' + r.neighborhood + ' · ' + beds + ' bd / ' + baths + ' ba' + sqft + '</div>' + tags +
       '<div class="t-price">$' + r.rent.toLocaleString() + ' <span>model $' + r.predicted.toLocaleString() + '/mo</span></div>' +
+      ((r.lat != null && r.lng != null)
+        ? '<div class="t-map-wrap"><div class="t-map"></div>' +
+          '<button class="t-map-expand" type="button" aria-label="Expand map" title="Expand map">⤢</button></div>'
+        : '') +
     '</div>';
 }
 
+// One tiny Leaflet map, mounted on the top card only and torn down each render.
+// Display-only (pointer-events:none in CSS) so dragging across it still swipes.
+let tMap = null;
+function clearMiniMap() { if (tMap) { tMap.remove(); tMap = null; } }
+function mountMiniMap(cardEl, r) {
+  const el = cardEl.querySelector('.t-map');
+  if (!el || !window.L || r.lat == null || r.lng == null) return;
+  tMap = L.map(el, {
+    zoomControl: false, attributionControl: false, dragging: false,
+    scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
+    keyboard: false, touchZoom: false, tap: false,
+  }).setView([r.lat, r.lng], 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(tMap);
+  L.marker([r.lat, r.lng]).addTo(tMap);
+}
+
 function renderDeck() {
+  clearMiniMap();
   stage.innerHTML = '';
   counter.textContent = ti < DECK.length ? (ti + 1) + ' / ' + DECK.length : DECK.length + ' / ' + DECK.length;
   if (ti >= DECK.length) { doneEl.classList.remove('hidden'); return; }
@@ -216,6 +237,7 @@ function renderDeck() {
   top.innerHTML = cardMarkup(DECK[ti]);
   stage.appendChild(top);
   attachDrag(top);
+  mountMiniMap(top, DECK[ti]);
 }
 
 function decide(reaction) {
@@ -280,6 +302,7 @@ function attachDrag(el) {
   const like = el.querySelector('.stamp.like');
   const pass = el.querySelector('.stamp.pass');
   el.addEventListener('pointerdown', e => {
+    if (e.target.closest('.t-map-expand')) return;   // let the expand button get its own click
     dragging = true; sx = e.clientX; sy = e.clientY; dx = 0; moved = 0;
     el.setPointerCapture(e.pointerId); el.style.transition = 'none';
   });
@@ -319,12 +342,26 @@ function openTinder() {
   ti = 0; history = []; hideToast(); updateUndo();
   tinder.classList.remove('hidden'); renderDeck();
 }
-function closeTinder() { hideToast(); tinder.classList.add('hidden'); }
+function closeTinder() { hideToast(); hideHint(); clearMiniMap(); tinder.classList.add('hidden'); }
+
+// "?" help popover
+const hintEl = document.getElementById('t-hint');
+function hideHint() { if (hintEl) hintEl.classList.add('hidden'); }
 
 const openBtn = document.getElementById('tinder-open');
 if (openBtn) openBtn.addEventListener('click', openTinder);
 document.getElementById('t-close').addEventListener('click', closeTinder);
 document.getElementById('t-back').addEventListener('click', closeTinder);
+document.getElementById('t-help').addEventListener('click', e => {
+  e.stopPropagation();                       // don't trigger the click-out handler
+  if (hintEl) hintEl.classList.toggle('hidden');
+});
+// Click on the backdrop (the dark whitespace around the card) closes the modal;
+// a click anywhere else just dismisses the help popover.
+tinder.addEventListener('click', e => {
+  if (e.target === tinder) { closeTinder(); return; }
+  if (hintEl && !hintEl.contains(e.target)) hideHint();
+});
 document.getElementById('t-like').addEventListener('click', () => flyTop(1));
 document.getElementById('t-pass').addEventListener('click', () => flyTop(-1));
 undoBtn.addEventListener('click', undoLast);

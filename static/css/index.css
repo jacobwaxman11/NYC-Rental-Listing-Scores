@@ -48,12 +48,20 @@
   .cs-menu li.opt.sel .ck::after { content:""; position:absolute; left:5px; top:2px;
                         width:4px; height:8px; border:solid var(--bg); border-width:0 2px 2px 0;
                         transform:rotate(45deg); }
-  .cs-menu .cs-tools { padding:2px 4px 8px; margin-bottom:5px; border-bottom:1px solid var(--line);
-                       display:flex; gap:6px; }
-  .cs-menu .cs-tools:hover { background:none; }
-  .cs-menu .cs-tools button { flex:1; background:#1f2734; border:1px solid var(--line);
-                              color:var(--muted); border-radius:6px; padding:5px; font-size:12px; cursor:pointer; }
+  /* Give the multi-area menu room so the action row never clips. */
+  .cs.multi .cs-menu { min-width:240px; }
+  /* Pinned action row: All / Clear as ghost buttons, Apply as the primary. */
+  .cs-menu .cs-tools { position:sticky; top:0; z-index:1; background:var(--card);
+                       padding:2px 2px 9px; margin-bottom:6px; border-bottom:1px solid var(--line);
+                       display:flex; align-items:center; gap:6px; }
+  .cs-menu .cs-tools:hover { background:var(--card); }
+  .cs-menu .cs-tools button { background:#1f2734; border:1px solid var(--line);
+                              color:var(--muted); border-radius:7px; padding:6px 11px; font-size:12px;
+                              cursor:pointer; transition:color .12s, border-color .12s; }
   .cs-menu .cs-tools button:hover { color:var(--txt); border-color:#3a4252; }
+  .cs-menu .cs-tools [data-apply] { margin-left:auto; background:var(--accent);
+                                    border-color:var(--accent); color:var(--bg); font-weight:650; }
+  .cs-menu .cs-tools [data-apply]:hover { border-color:var(--accent); color:var(--bg); filter:brightness(1.06); }
 
   .tinder-open { background:linear-gradient(135deg,#fb7185,#f59e0b); color:#fff;
                  border:none; border-radius:9px; padding:9px 14px; font-size:13px;
@@ -86,7 +94,8 @@
   .ai-banner { color:var(--txt); font-size:13px; }
   .ai-banner a { color:var(--accent); text-decoration:none; }
   .ai-note { color:var(--muted); font-size:12px; }
-  .foot-actions { display:flex; gap:12px; align-items:center; }
+  .foot-actions { display:flex; gap:12px; align-items:center; flex:none; }
+  .similar, a.view { white-space:nowrap; }
   .similar { background:none; border:none; color:var(--accent); cursor:pointer;
              font-size:13px; padding:0; }
   .tags { display:flex; flex-wrap:wrap; gap:5px; }
@@ -148,9 +157,14 @@
   .tinder { position:fixed; inset:0; background:rgba(8,9,12,.92); z-index:100;
             display:flex; flex-direction:column; align-items:center; padding:10px 12px; }
   .tinder.hidden { display:none; }
-  .t-head { width:100%; max-width:560px; display:flex; justify-content:space-between;
-            align-items:center; color:var(--muted); font-size:14px; }
+  .t-head { position:relative; width:100%; max-width:560px; display:flex;
+            justify-content:space-between; align-items:center; color:var(--muted); font-size:14px; }
+  .t-head-right { display:flex; align-items:center; gap:6px; }
   .t-head button { background:none; border:none; color:var(--txt); font-size:22px; cursor:pointer; }
+  #t-help { width:26px; height:26px; font-size:14px; font-weight:700; border-radius:50%;
+            border:1px solid var(--line); color:var(--muted); display:flex; align-items:center;
+            justify-content:center; line-height:1; }
+  #t-help:hover { color:var(--txt); border-color:#3a4252; }
   .t-stage { position:relative; width:min(560px,96vw); height:min(860px,82vh);
              margin:10px 0; }
   .t-card { position:absolute; inset:0; background:var(--card); border:1px solid var(--line);
@@ -186,6 +200,11 @@
            color:var(--muted); border-radius:6px; padding:2px 7px; }
   .t-price { font-size:20px; font-weight:700; }
   .t-price span { color:var(--muted); font-size:13px; font-weight:400; }
+  /* Tiny location map — display-only (pointer-events off) so it never blocks
+     a swipe; just enough to read cross-streets/area. */
+  .t-map { height:90px; border-radius:10px; overflow:hidden; margin-top:3px;
+           background:#0b0d11; pointer-events:none; }
+  .t-map .leaflet-container { background:#0b0d11; }
   .stamp { position:absolute; top:24px; padding:6px 14px; border:4px solid; border-radius:10px;
            font-weight:800; font-size:26px; letter-spacing:2px; opacity:0; transform:rotate(-15deg); }
   .stamp.like { left:20px; color:var(--good); border-color:var(--good); }
@@ -198,7 +217,12 @@
   .t-btn.like { color:var(--good); }
   .t-undo { width:48px; height:48px; font-size:18px; color:var(--muted); align-self:center; }
   .t-undo:disabled { opacity:.35; cursor:default; transform:none; }
-  .t-hint { color:var(--muted); font-size:12px; margin-top:10px; }
+  .t-hint { position:absolute; top:36px; right:0; z-index:5; width:min(300px,86vw);
+            background:var(--card); border:1px solid var(--line); border-radius:10px;
+            padding:10px 12px; color:var(--muted); font-size:12px; line-height:1.55;
+            box-shadow:0 12px 30px rgba(0,0,0,.5); }
+  .t-hint.hidden { display:none; }
+  .t-hint b { color:var(--txt); font-weight:650; }
   .t-toast { position:fixed; bottom:26px; left:50%; transform:translateX(-50%);
              background:var(--card); border:1px solid var(--line); border-radius:999px;
              padding:9px 10px 9px 16px; display:flex; align-items:center; gap:12px;

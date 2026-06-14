@@ -741,7 +741,7 @@ def index():
     liked_total = sum(1 for r in _STATE["suggestions"] if r["reaction"] == "liked")
     passed_total = sum(1 for r in _STATE["suggestions"] if r["reaction"] == "passed")
 
-    return render_template(
+    html = render_template(
         "index.html", rows=rows, meta=meta,
         liked_total=liked_total, passed_total=passed_total,
         show=show, sort=sort, nh=nh, nh_list=sorted(nh_set), min_beds=str(min_beds),
@@ -750,6 +750,9 @@ def index():
         ai_model=ai["model"], ai_banner=ai_banner, distances=distances,
         emb_ready=bool(_STATE["embeddings"]),
     )
+    # Don't let the browser cache the grid — otherwise a reload serves the old
+    # HTML and the Shuffle sort looks "stuck" on the same order.
+    return html, 200, {"Cache-Control": "no-store"}
 
 
 @app.route("/listing/<listing_id>")
