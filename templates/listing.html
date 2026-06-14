@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}{{ l.name }} · StreetEasier{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/listing.css') }}">
+<!-- Leaflet (interactive OpenStreetMap) — no API key required -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+{% endblock %}
+{% block body %}
+
+<header class="d-head">
+  <a class="back" href="javascript:history.length>1?history.back():location.assign('/')">← back</a>
+  <a class="brand" href="/" title="Home">
+    <svg class="logo" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#fb7185"/><stop offset="1" stop-color="#f59e0b"/>
+      </linearGradient></defs>
+      <path d="M16 4 L29 15 L26 15 L26 28 L6 28 L6 15 L3 15 Z" fill="url(#lg)"/>
+      <g fill="#15181e">
+        <rect x="8.5" y="18.5" width="6" height="4.6" rx="2"/>
+        <rect x="17.5" y="18.5" width="6" height="4.6" rx="2"/>
+        <rect x="14.4" y="20" width="3.2" height="1.5"/>
+      </g>
+    </svg>
+    <h1>StreetEasier</h1>
+  </a>
+  <div class="tools">
+    {% if l.url %}<a class="refresh" href="{{ l.url }}" target="_blank" rel="noopener">view on StreetEasy ↗</a>{% endif %}
+  </div>
+</header>
+
+<main class="detail">
+  <!-- Gallery -->
+  <section class="gallery">
+    {% if positions %}
+      <div class="g-main" id="g-main"
+           style="background-image:url('/img/{{ l.listing_id }}/{{ positions[0] }}')">
+        <button class="g-nav left"  id="g-prev" aria-label="Previous photo">‹</button>
+        <button class="g-nav right" id="g-next" aria-label="Next photo">›</button>
+        <span class="g-count"><span id="g-idx">1</span> / {{ positions|length }}</span>
+      </div>
+      {% if positions|length > 1 %}
+        <div class="g-thumbs" id="g-thumbs">
+          {% for p in positions %}
+            <div class="g-thumb {{ 'sel' if loop.index0 == 0 }}" data-i="{{ loop.index0 }}"
+                 style="background-image:url('/img/{{ l.listing_id }}/{{ p }}')"></div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% else %}
+      <div class="g-main empty">No photos</div>
+    {% endif %}
+  </section>
+
+  <!-- Summary / actions -->
+  <aside class="summary">
+    <div class="s-price">
+      <span class="rent">${{ '{:,}'.format(l.rent) if l.rent else '—' }}<span class="mo">/mo</span></span>
+      {% if s and s.pct_diff is not none %}
+        {% if s.pct_diff < 0 %}
+          <span class="badge good">{{ '%.0f'|format(-s.pct_diff*100) }}% below model · save ${{ '{:,}'.format(s.delta) }}/mo</span>
+        {% else %}
+          <span class="badge bad">{{ '%.0f'|format(s.pct_diff*100) }}% above model</span>
+        {% endif %}
+        <div class="model-note">model estimate ${{ '{:,}'.format(s.predicted) }}/mo</div>
+      {% endif %}
+    </div>
+
+    <div class="s-addr">{{ l.name }}</div>
+    <div class="s-sub">{{ l.street or '' }}{% if l.neighborhood %} · {{ l.neighborhood }}{% endif %}</div>
+
+    <div class="s-facts">
+      <div><b>{{ (l.beds|int) if l.beds is not none else '?' }}</b><span>beds</span></div>
+      <div><b>{{ l.baths if l.baths is not none else '?' }}</b><span>baths</span></div>
+      <div><b>{{ '{:,}'.format(l.sqft) if l.sqft else '—' }}</b><span>ft²</span></div>
+      <div><b>{{ s.apt_quality if (s and s.apt_quality is not none) else '—' }}</b><span>photo /10</span></div>
+    </div>
+
+    {% if l.available_from or l.building_type or l.furnished or l.lease_months %}
+    <ul class="s-extra">
+      {% if l.available_from %}<li><span>Available</span>{{ l.available_from }}</li>{% endif %}
+      {% if l.building_type %}<li><span>Building</span>{{ l.building_type }}</li>{% endif %}
+      {% if l.lease_months %}<li><span>Lease</span>{{ l.lease_months }} mo</li>{% endif %}
+      {% if l.furnished %}<li><span>Furnished</span>{{ l.furnished }}</li>{% endif %}
+    </ul>
+    {% endif %}
+
+    <div class="s-actions">
+      <button class="t-btn pass {{ 'on' if reaction == 'passed' }}" id="d-pass"
+              data-id="{{ l.listing_id }}" title="Pass">✕</button>
+      <button class="t-btn like {{ 'on' if reaction == 'liked' }}" id="d-heart"
+              data-id="{{ l.listing_id }}" title="Like">♥</button>
+    </div>
+    <a class="act primary wide" href="/?similar={{ l.listing_id }}">✨ More like this</a>
+  </aside>
+
+  <!-- Description -->
+  {% if l.description %}
+  <section class="block desc">
+    <h2>About this home</h2>
+    <p>{{ l.description }}</p>
+  </section>
+  {% endif %}
+
+  <!-- Amenities -->
+  {% if amenities %}
+  <section class="block">
+    <h2>Amenities</h2>
+    <div class="chips">
+      {% for a in amenities %}<span class="chip-a">{{ a }}</span>{% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Photo tags -->
+  {% if tags %}
+  <section class="block">
+    <h2>From the photos</h2>
+    <div class="chips">
+      {% for t in tags %}<a class="chip-a tag" href="/?tag={{ t }}">{{ t.replace('_', ' ') }}</a>{% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Map -->
+  {% if l.lat and l.lng %}
+  <section class="block map-block">
+    <h2>Location</h2>
+    <div id="map" data-lat="{{ l.lat }}" data-lng="{{ l.lng }}"
+         data-label="{{ l.name|e }}"></div>
+  </section>
+  {% endif %}
+</main>
+
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+  window.__GALLERY = {
+    id: {{ l.listing_id|tojson }},
+    positions: {{ positions|tojson }},
+  };
+</script>
+<script src="{{ url_for('static', filename='js/listing.js') }}"></script>
+{% endblock %}

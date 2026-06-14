@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}StreetEasier{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+<!-- Leaflet (tiny location map inside Tinder cards) — no API key required -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+{% endblock %}
+{% block body %}
+{% macro csel(param, current, options) %}
+<div class="cs" data-param="{{ param }}">
+  <button type="button" class="cs-btn">
+    <span>{{ options[current] if current in options else (options.values()|list)[0] }}</span><i>▾</i>
+  </button>
+  <ul class="cs-menu">
+    {% for val, label in options.items() %}
+      <li data-value="{{ val }}" class="{{ 'sel' if val == current }}">{{ label }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endmacro %}
+
+<header>
+  <a class="brand" href="/" title="Home">
+    <svg class="logo" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#fb7185"/><stop offset="1" stop-color="#f59e0b"/>
+      </linearGradient></defs>
+      <!-- house silhouette -->
+      <path d="M16 4 L29 15 L26 15 L26 28 L6 28 L6 15 L3 15 Z" fill="url(#lg)"/>
+      <!-- chill sunglasses (the "easier" bit) -->
+      <g fill="#15181e">
+        <rect x="8.5" y="18.5" width="6" height="4.6" rx="2"/>
+        <rect x="17.5" y="18.5" width="6" height="4.6" rx="2"/>
+        <rect x="14.4" y="20" width="3.2" height="1.5"/>
+      </g>
+    </svg>
+    <h1>StreetEasier</h1>
+  </a>
+  <span class="sub">
+    {% if group_on %}{{ n_units }} unit{{ '' if n_units == 1 else 's' }} across {{ n_buildings }} building{{ '' if n_buildings == 1 else 's' }} ·
+    {% endif %}{{ liked_total }} ❤ · {{ passed_total }} ✕ ·
+    {{ "out-of-fold (grouped by building)" if meta.cv else "in-sample fit" }}
+  </span>
+  {% set sort_labels = {'deal':'Biggest discount','rent_asc':'Rent ↑','rent_desc':'Rent ↓','quality':'Photo quality'} %}
+  {% set show_labels = {'all':'All listings','liked':'❤ Liked','passed':'✕ Passed'} %}
+  {% set price_active = pmin != price_min or pmax != price_max %}
+  <div class="tools">
+    <button class="filters-toggle" id="filters-toggle" title="Show / hide filters">⚙ Filters</button>
+    <div class="filters" id="filters">
+    {{ csel('show', show, {'under':'Underpriced only','all':'All listings','liked':'❤ Liked','passed':'✕ Passed'}) }}
+    {{ csel('sort', sort, {'shuffle':'Shuffle','deal':'Biggest discount','rent_asc':'Rent: low → high','rent_desc':'Rent: high → low','quality':'Photo quality'}) }}
+    {{ csel('beds', min_beds, {'0':'Any beds','1':'1+ bed','2':'2+ bed','3':'3+ bed'}) }}
+
+    <div class="cs multi" data-name="nh">
+      <button type="button" class="cs-btn"><span>{{ (nh_list|length ~ ' area' ~ ('' if nh_list|length == 1 else 's')) if nh_list else 'All areas' }}</span><i>▾</i></button>
+      <ul class="cs-menu">
+        <li class="cs-tools">
+          <button type="button" data-all>All</button>
+          <button type="button" data-none>Clear</button>
+          <button type="button" data-apply>Apply</button>
+        </li>
+        {% for n in meta.neighborhoods %}
+          <li data-value="{{ n }}" class="opt {{ 'sel' if n in nh_list }}"><span class="ck"></span><span class="nm">{{ n }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="cs price" id="price-cs">
+      <button type="button" class="cs-btn"><span>{% if price_active %}${{ '{:,}'.format(pmin) }}–${{ '{:,}'.format(pmax) }}{{ '+' if pmax == price_max }}{% else %}Any price{% endif %}</span><i>▾</i></button>
+      <div class="cs-menu price-menu">
+        <div class="price-vals"><span id="pv-min"></span><span id="pv-max"></span></div>
+        <div class="price-slider">
+          <div class="p-track"></div>
+          <div class="p-range" id="p-range"></div>
+          <input type="range" id="p-min" min="{{ price_min }}" max="{{ price_max }}" step="{{ price_step }}" value="{{ pmin }}">
+          <input type="range" id="p-max" min="{{ price_min }}" max="{{ price_max }}" step="{{ price_step }}" value="{{ pmax }}">
+        </div>
+        <div class="price-actions">
+          <button type="button" id="p-reset">Reset</button>
+          <button type="button" id="p-apply">Apply</button>
+        </div>
+      </div>
+    </div>
+    </div>{# /filters #}
+
+    {% set ns = namespace(chips=[]) %}
+    {% if show in show_labels %}{% set ns.chips = ns.chips + [show_labels[show]] %}{% endif %}
+    {% if sort in sort_labels %}{% set ns.chips = ns.chips + [sort_labels[sort]] %}{% endif %}
+    {% if min_beds|int > 0 %}{% set ns.chips = ns.chips + [min_beds ~ '+ bed'] %}{% endif %}
+    {% if nh_list %}{% set ns.chips = ns.chips + [(nh_list|length ~ ' area' ~ ('' if nh_list|length == 1 else 's'))] %}{% endif %}
+    {% if price_active %}{% set ns.chips = ns.chips + ['$' ~ '{:,}'.format(pmin) ~ '–$' ~ '{:,}'.format(pmax) ~ ('+' if pmax == price_max else '')] %}{% endif %}
+    <button class="filter-summary" id="filter-summary" title="Edit filters">
+      {% for c in ns.chips %}<span class="fs-chip">{{ c }}</span>{% endfor %}
+      {% if not ns.chips %}<span class="fs-none">No filters set</span>{% endif %}
+    </button>
+
+    <button class="tinder-open" id="tinder-open" {{ 'disabled' if not rows }}>🔥 Tinder mode</button>
+    <a class="tinder-open match {{ 'disabled' if not (emb_ready and liked_total) }}"
+       href="{{ '/?match=likes' if (emb_ready and liked_total) else '#' }}"
+       title="{{ 'Rank unreviewed listings by similarity to what you liked' if emb_ready else 'Run embed_listings.py first to enable' }}">🧭 Match my likes</a>
+    <button class="grp-toggle {{ 'on' if group_on }}" id="grp-toggle" data-group="{{ 0 if group_on else 1 }}"
+            title="{{ 'Showing one card per building' if group_on else 'Showing every unit' }}">🏢 {{ 'Grouped' if group_on else 'Flat' }}</button>
+    <button class="view-toggle" id="view-toggle" data-view="grid" {{ 'disabled' if not rows }} title="Toggle map view">🗺 Map</button>
+    <a class="refresh" href="/run">⚙ Pipeline</a>
+    <a class="refresh" href="/?refresh=1">↻ recompute</a>
+  </div>
+</header>
+
+<div class="searchbar">
+  <form method="get">
+    <input type="text" name="q" id="q" autocomplete="off" value="{{ q }}"
+           placeholder="Ask AI: “like this but bigger” · “based on what I liked, find ones I haven't reviewed”"
+           {{ 'disabled' if not ai_enabled }}>
+    <input type="hidden" name="ref" id="ref" value="{{ ref }}">
+    <span id="ref-chip" class="chip {{ '' if ref else 'hidden' }}">
+      like: <b id="ref-name">{{ ref_name }}</b>
+      <button type="button" id="ref-clear" title="Clear reference">✕</button>
+    </span>
+    <button type="submit" class="ask" {{ 'disabled' if not ai_enabled }}>Ask AI</button>
+  </form>
+  {% if ai_banner %}
+    <div class="ai-banner">{{ ai_banner }} · {{ rows|length }} result{{ '' if rows|length == 1 else 's' }} · <a href="/">clear</a></div>
+  {% endif %}
+  {% if active_tag and not searching %}
+    <div class="ai-banner">🏷 {{ active_tag.replace('_', ' ') }} · {{ rows|length }} result{{ '' if rows|length == 1 else 's' }} · <a href="/">clear</a></div>
+  {% endif %}
+  {% if not ai_enabled %}
+    <div class="ai-note">AI search is off — start the server with <code>--provider gemini</code>
+      (or <code>anthropic</code>) and set the matching API key in <code>.env</code> to enable.</div>
+  {% endif %}
+</div>
+
+{% if not rows %}
+  <div class="empty">
+    {% if meta.total == 0 %}
+      <p>No scored listings yet. Run the pipeline first:</p>
+      <p><code>python scrape_listings.py</code> →
+         <code>python backfill_details.py</code> →
+         <code>python score_listings.py</code></p>
+      <p>Then reload this page.</p>
+    {% else %}
+      <p>No listings match these filters. Try “All listings” or clearing the area/beds filter.</p>
+    {% endif %}
+  </div>
+{% else %}
+  <main>
+  {% for r in rows %}
+    <div class="card" data-href="/listing/{{ r.listing_id }}">
+      <div class="photo" data-id="{{ r.listing_id }}" {% if r.img_pos is not none %}style="background-image:url('/img/{{ r.listing_id }}/{{ r.img_pos }}')"{% endif %}>
+        <button class="heart {{ 'on' if r.reaction == 'liked' }}" data-id="{{ r.listing_id }}" title="Like">♥</button>
+        {% if show != 'passed' %}<button class="card-pass" data-id="{{ r.listing_id }}" title="Pass">✕</button>{% endif %}
+        {% if show == 'passed' %}<button class="undo" data-id="{{ r.listing_id }}" title="Restore">↩</button>{% endif %}
+      </div>
+      <div class="body">
+        {% if r.pct_diff < 0 %}
+          <span class="badge good">{{ '%.0f'|format(-r.pct_diff*100) }}% below model · save ${{ '{:,}'.format(r.delta) }}/mo</span>
+        {% else %}
+          <span class="badge bad">{{ '%.0f'|format(r.pct_diff*100) }}% above model</span>
+        {% endif %}
+        <div class="addr">{{ r.name }}</div>
+        <div class="meta">
+          {{ r.neighborhood }} ·
+          {{ (r.beds|int) if r.beds is not none else '?' }} bd /
+          {{ r.baths if r.baths is not none else '?' }} ba{% if r.sqft %} · {{ '{:,}'.format(r.sqft) }} ft²{% endif %}{% if distances.get(r.listing_id) is not none %} · <span class="dist">{{ '%.1f'|format(distances[r.listing_id]) }} mi away</span>{% endif %}
+        </div>
+        {% if r.tags %}
+          <div class="tags">
+            {% for t in r.tags[:6] %}<a class="tag {{ 'active' if t == active_tag }}" href="/?tag={{ t }}">{{ t.replace('_', ' ') }}</a>{% endfor %}
+          </div>
+        {% endif %}
+        <div class="prices">
+          <span class="rent">${{ '{:,}'.format(r.rent) }}</span>
+          <span class="pred">model ${{ '{:,}'.format(r.predicted) }}/mo</span>
+        </div>
+        <div class="foot">
+          <span>photo quality: <span class="q">{{ r.apt_quality if r.apt_quality is not none else '—' }}</span>/10
+            {% if r.photos %}· {{ r.photos }} photos{% endif %}</span>
+          <span class="foot-actions">
+            <a class="similar" href="/?similar={{ r.listing_id }}" title="Find similar listings">✨ similar</a>
+            {% if r.url %}<a class="view" href="{{ r.url }}" target="_blank" rel="noopener">view ↗</a>{% endif %}
+          </span>
+        </div>
+        {% set others = group_others.get(r.listing_id) %}
+        {% if others %}
+          <button class="bldg-toggle" type="button" data-target="bldg-{{ r.listing_id }}">
+            🏢 {{ others|length + 1 }} units in this building <span class="chev">▾</span>
+          </button>
+          <div class="bldg-units" id="bldg-{{ r.listing_id }}" hidden>
+            {% for o in others %}
+              <a class="bldg-unit" href="/listing/{{ o.listing_id }}">
+                <span class="u-rent">${{ '{:,}'.format(o.rent) }}</span>
+                <span class="u-meta">{{ (o.beds|int) if o.beds is not none else '?' }} bd / {{ o.baths if o.baths is not none else '?' }} ba{% if o.sqft %} · {{ '{:,}'.format(o.sqft) }} ft²{% endif %}</span>
+                {% if o.pct_diff < 0 %}<span class="u-deal good">{{ '%.0f'|format(-o.pct_diff*100) }}% below</span>{% else %}<span class="u-deal bad">{{ '%.0f'|format(o.pct_diff*100) }}% above</span>{% endif %}
+              </a>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  {% endfor %}
+  </main>
+  <div id="map-view" class="map-view hidden"></div>
+{% endif %}
+
+<!-- Tinder mode -->
+<div id="tinder" class="tinder hidden">
+  <div class="t-head">
+    <span id="t-count"></span>
+    <div class="t-head-right">
+      <button id="t-help" title="How it works" aria-label="How it works">?</button>
+      <button id="t-close" title="Close">✕</button>
+    </div>
+    <div id="t-hint" class="t-hint hidden">
+      <b>Drag</b> or use the buttons to like/pass · <b>tap a photo</b> left/right to flip through photos · <b>← / →</b> like/pass · <b>z</b> undo
+    </div>
+  </div>
+  <div id="t-stage" class="t-stage"></div>
+  <div class="t-actions">
+    <button class="t-btn t-undo" id="t-undo" title="Undo (z)" disabled>↩</button>
+    <button class="t-btn pass" id="t-pass" title="Pass (←)">✕</button>
+    <button class="t-btn like" id="t-like" title="Like (→)">♥</button>
+  </div>
+  <div id="t-done" class="t-done hidden">
+    <p>That's everything in this view.</p>
+    <button id="t-back">← back to grid</button>
+  </div>
+  <div id="t-toast" class="t-toast hidden">
+    <span id="t-toast-msg"></span>
+    <button id="t-toast-undo">Undo</button>
+  </div>
+  <div id="t-map-full" class="t-map-full hidden">
+    <div id="t-map-full-canvas"></div>
+    <button id="t-map-full-close" type="button" title="Close map" aria-label="Close map">✕</button>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>window.__DECK = {{ rows|tojson }};</script>
+<script src="{{ url_for('static', filename='js/index.js') }}"></script>
+{% endblock %}

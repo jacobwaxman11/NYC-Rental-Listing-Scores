@@ -1,0 +1,24 @@
+# Virtual environments
+.venv/
+venv/
+
+# Secrets / environment
+.env
+
+# Databases (per ReadMe — rebuildable, not tracked)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Downloaded listing photos
+images/
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# IDE
+.idea/

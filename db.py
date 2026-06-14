@@ -27,109 +27,14 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterable, Iterator, Optional
 
+from config import DEFAULT_DB_PATH
 
-DEFAULT_DB_PATH = "rentals.db"
 
-
-SCHEMA = """
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS listings (
-    listing_id              TEXT PRIMARY KEY,
-    url                     TEXT,
-    name                    TEXT,
-    street                  TEXT,
-    neighborhood            TEXT,
-    zip                     TEXT,
-    lat                     REAL,
-    lng                     REAL,
-    beds                    REAL,
-    baths                   REAL,
-    sqft                    INTEGER,
-    rent                    INTEGER,
-    lease_months            INTEGER,
-    furnished               TEXT,
-    building_type           TEXT,
-    building_slug           TEXT,
-    unit                    TEXT,
-    description             TEXT,
-    available_from          TEXT,
-    floor_plan_url          TEXT,
-    local_floor_plan_path   TEXT,
-    scraped_at              TEXT,
-    detail_fetched_at       TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_listings_neighborhood ON listings(neighborhood);
-CREATE INDEX IF NOT EXISTS idx_listings_building     ON listings(building_slug);
-
-CREATE TABLE IF NOT EXISTS listing_amenities (
-    listing_id  TEXT NOT NULL REFERENCES listings(listing_id) ON DELETE CASCADE,
-    amenity     TEXT NOT NULL,
-    PRIMARY KEY (listing_id, amenity)
-);
-CREATE INDEX IF NOT EXISTS idx_amenity ON listing_amenities(amenity);
-
-CREATE TABLE IF NOT EXISTS listing_images (
-    listing_id        TEXT NOT NULL REFERENCES listings(listing_id) ON DELETE CASCADE,
-    position          INTEGER NOT NULL,
-    image_url         TEXT NOT NULL,
-    local_image_path  TEXT,
-    PRIMARY KEY (listing_id, position)
-);
-CREATE INDEX IF NOT EXISTS idx_listing_images_url ON listing_images(image_url);
-
-CREATE TABLE IF NOT EXISTS image_scores (
-    image_url         TEXT PRIMARY KEY,
-    image_category    TEXT,    -- 'apartment' | 'common_space' | 'irrelevant'
-    -- apartment-only fields
-    room_type         TEXT,
-    natural_light     INTEGER,
-    space_feeling     INTEGER,
-    view_quality      INTEGER,
-    -- common-space-only fields
-    space_type        TEXT,
-    appeal            INTEGER,
-    -- shared between apartment + common_space
-    finish_quality    INTEGER,
-    condition_score   INTEGER,
-    -- irrelevant-only
-    irrelevant_reason TEXT,
-    -- bookkeeping
-    model             TEXT,
-    scored_at         TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_image_scores_category ON image_scores(image_category);
-CREATE INDEX IF NOT EXISTS idx_image_scores_room     ON image_scores(room_type);
-CREATE INDEX IF NOT EXISTS idx_image_scores_space    ON image_scores(space_type);
-
-CREATE TABLE IF NOT EXISTS listing_scores (
-    listing_id              TEXT PRIMARY KEY REFERENCES listings(listing_id) ON DELETE CASCADE,
-    -- apartment aggregates
-    avg_natural_light       REAL,
-    avg_finish_quality      REAL,
-    avg_space_feeling       REAL,
-    avg_condition           REAL,
-    max_view_quality        INTEGER,
-    pct_bright_rooms        REAL,
-    has_good_view           INTEGER,  -- 0/1
-    -- common-space aggregates
-    common_avg_finish_quality REAL,
-    common_avg_condition      REAL,
-    common_avg_appeal         REAL,
-    -- counts
-    photos_total            INTEGER,
-    photos_scored           INTEGER,
-    photos_apartment        INTEGER,
-    photos_common           INTEGER,
-    photos_irrelevant       INTEGER,
-    -- nested distributions kept as JSON (small, not feature-y)
-    room_type_counts_json   TEXT,
-    space_type_counts_json  TEXT,
-    aggregated_at           TEXT
-);
-"""
+# The DDL lives in schema.sql (alongside this file) for real SQL highlighting.
+SCHEMA = (Path(__file__).parent / "schema.sql").read_text()
 
 
 # ── connection ────────────────────────────────────────────────────────────────
@@ -240,6 +145,26 @@ def listings_missing_amenities(conn: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def listings_never_fetched(conn: sqlite3.Connection) -> list[dict]:
+    """Listings whose detail page has never been fetched — i.e.
+    ``detail_fetched_at`` is still NULL.
+
+    Unlike :func:`listings_missing_amenities`, this never re-selects a listing
+    that was already attempted, even if the fetch turned up no amenities (some
+    listings genuinely have none). Use this to backfill only the truly-missing
+    data without re-hitting StreetEasy for listings we've already processed.
+    """
+    rows = conn.execute(
+        """
+        SELECT l.*
+        FROM listings l
+        WHERE l.detail_fetched_at IS NULL
+        ORDER BY l.listing_id
+        """
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def listings_missing_scores(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         """
@@ -276,6 +201,23 @@ def get_amenities(conn: sqlite3.Connection, listing_id: str) -> list[str]:
             (listing_id,),
         )
     ]
+
+
+def get_all_listing_amenities(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    """Return {listing_id: [amenity, ...]} for every listing with amenities.
+
+    The bulk counterpart to :func:`get_amenities` — used to attach the
+    StreetEasy-scraped amenities (pool, washer_dryer, gym, dishwasher, …) to the
+    web UI's suggestion rows for amenity chips and search, alongside (and kept
+    distinct from) the vision-derived photo tags.
+    """
+    rows = conn.execute(
+        "SELECT listing_id, amenity FROM listing_amenities ORDER BY listing_id, amenity"
+    ).fetchall()
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        out.setdefault(r["listing_id"], []).append(r["amenity"])
+    return out
 
 
 # ── images ───────────────────────────────────────────────────────────────────
@@ -380,6 +322,40 @@ def upsert_image_score(
         ),
     )
 
+    # Replace the image's descriptive tags (controlled-vocabulary keywords).
+    conn.execute("DELETE FROM image_tags WHERE image_url=?", (image_url,))
+    tags = score.get("tags") or []
+    if tags:
+        conn.executemany(
+            "INSERT OR IGNORE INTO image_tags (image_url, tag) VALUES (?, ?)",
+            [(image_url, t) for t in tags],
+        )
+
+
+def get_all_listing_tags(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    """Roll image tags up to the listing level via listing_images.
+
+    Returns {listing_id: [tag, ...]} ordered by how many of the listing's photos
+    carry each tag (most frequent first). A tag on a shared image counts once
+    per listing that references it.
+    """
+    rows = conn.execute(
+        """
+        SELECT li.listing_id AS listing_id, it.tag AS tag, COUNT(*) AS n
+        FROM listing_images li
+        JOIN image_tags it ON li.image_url = it.image_url
+        GROUP BY li.listing_id, it.tag
+        """
+    ).fetchall()
+
+    acc: dict[str, list[tuple[str, int]]] = {}
+    for r in rows:
+        acc.setdefault(r["listing_id"], []).append((r["tag"], r["n"]))
+    return {
+        lid: [t for t, _ in sorted(pairs, key=lambda p: (-p[1], p[0]))]
+        for lid, pairs in acc.items()
+    }
+
 
 def image_score_to_dict(row: dict) -> dict:
     """Convert a flat image_scores row back into the nested shape the
@@ -465,6 +441,92 @@ def upsert_listing_scores(
         """,
         values,
     )
+
+
+# ── reactions (hearts / swipes) ──────────────────────────────────────────────
+
+
+def set_reaction(
+    conn: sqlite3.Connection, listing_id: str, reaction: Optional[str]
+) -> None:
+    """Set or clear a user's reaction to a listing.
+
+    ``reaction`` is 'liked' or 'passed'; pass None (or '' / 'none') to clear it.
+    """
+    if reaction in (None, "", "none"):
+        conn.execute("DELETE FROM listing_reactions WHERE listing_id=?", (listing_id,))
+        return
+    conn.execute(
+        """
+        INSERT INTO listing_reactions (listing_id, reaction, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(listing_id) DO UPDATE SET
+            reaction=excluded.reaction, updated_at=excluded.updated_at
+        """,
+        (listing_id, reaction, _utcnow()),
+    )
+
+
+def get_reactions(conn: sqlite3.Connection) -> dict[str, str]:
+    """Return {listing_id: reaction} for every listing the user has reacted to."""
+    return {
+        r["listing_id"]: r["reaction"]
+        for r in conn.execute("SELECT listing_id, reaction FROM listing_reactions")
+    }
+
+
+# ── embeddings ───────────────────────────────────────────────────────────────
+
+
+def upsert_embedding(
+    conn: sqlite3.Connection,
+    listing_id: str,
+    model: str,
+    vector: list[float],
+    text_hash: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO listing_embeddings
+            (listing_id, model, dim, text_hash, vector, embedded_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (listing_id, model, len(vector), text_hash, json.dumps(vector), _utcnow()),
+    )
+
+
+def get_embedding_hashes(conn: sqlite3.Connection) -> dict[str, str]:
+    """{listing_id: text_hash} for already-embedded listings (incremental skip)."""
+    return {
+        r["listing_id"]: r["text_hash"]
+        for r in conn.execute("SELECT listing_id, text_hash FROM listing_embeddings")
+    }
+
+
+def get_all_embeddings(conn: sqlite3.Connection) -> dict[str, list[float]]:
+    """{listing_id: vector} for every embedded listing."""
+    return {
+        r["listing_id"]: json.loads(r["vector"])
+        for r in conn.execute("SELECT listing_id, vector FROM listing_embeddings")
+    }
+
+
+# ── meta (generic key/value bookkeeping) ─────────────────────────────────────
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+        """,
+        (key, str(value), _utcnow()),
+    )
+
+
+def get_meta(conn: sqlite3.Connection, key: str, default: Optional[str] = None) -> Optional[str]:
+    row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+    return row[0] if row else default
 
 
 # ── DB-level summary (useful for CLI tools) ──────────────────────────────────

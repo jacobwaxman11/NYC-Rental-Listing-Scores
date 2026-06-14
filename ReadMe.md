@@ -1,7 +1,7 @@
 # NYCRentalRankings
 
-Scrape StreetEasy rental listings, score their photos with Gemini, and use
-regression models to identify mispriced apartments.
+Scrape StreetEasy rental listings, score their photos with Gemini **or Claude**,
+and use regression models to identify mispriced apartments.
 
 ## Storage
 
@@ -33,7 +33,52 @@ python backfill_details.py --max-listings 50
 python score_listings.py  --max-listings 50
 ```
 
-Set `GOOGLE_API_KEY` in a `.env` file before running the scorer.
+### Delta polling (cheap periodic updates)
+
+Re-running is cheap by design, so you can poll on a schedule:
+
+- **scrape** sorts newest-first and **early-stops** each area at the first page
+  with no new listings — a periodic poll fetches ~1–2 search pages per area
+  instead of re-crawling everything. Pass `--full` for an occasional complete
+  re-crawl.
+- **backfill** with `--only-missing` only fetches detail pages it hasn't seen
+  (`detail_fetched_at IS NULL`); **score** / **embed** skip already-done work.
+- Each run records its time (in the `meta` table via `poll_state.py`) and prints
+  *"Last scrape: 6h ago"* / *"Last backfill: …"* at startup.
+
+```bash
+python scrape_listings.py    # delta: newest-first, early-stop
+python scrape_listings.py --full   # full re-crawl
+```
+
+### Photo scoring provider
+
+`score_listings.py` can score photos with either Gemini or Claude. Both produce
+the **same** score shape (see `image_scores` table), so you can run one set of
+images through each and compare. The provider/model that scored each image is
+recorded in `image_scores.model`, and already-scored images are skipped
+regardless of which provider produced them.
+
+```bash
+# Gemini (default)
+python score_listings.py --provider gemini   --model gemini-2.5-flash
+
+# Claude — default model is claude-opus-4-8; claude-haiku-4-5 is cheaper/faster
+python score_listings.py --provider anthropic --model claude-opus-4-8
+python score_listings.py --provider anthropic --model claude-haiku-4-5
+```
+
+Set the matching key in a `.env` file before running the scorer:
+`GOOGLE_API_KEY` for `--provider gemini`, `ANTHROPIC_API_KEY` for
+`--provider anthropic`.
+
+In the same call, each apartment photo is also tagged with descriptive keywords
+from a controlled ~80-term vocabulary (`hardwood_floors`, `exposed_brick`,
+`duplex`, `high_ceilings`, `private_balcony`, `windowed_kitchen`, …; see
+`TAG_GROUPS` in [`tags.py`](tags.py)). Tags are stored in the
+`image_tags` table and rolled up per listing, powering tag chips and AI-search
+filters in the web UI. No extra API call — the tags come back in the scoring
+response.
 
 ## Building the training frame
 
@@ -85,6 +130,67 @@ Key design decisions:
   same building don't appear in both train and test)
 - **StandardScaler** inside the pipeline (refit per CV fold)
 - Models are compared across raw (v1) and compressed (v2) feature sets
+
+## Web UI
+
+[`web.py`](web.py) is a small Flask front-end that serves the listings the
+model flags as underpriced. It builds the feature frame, predicts each
+listing's "market" rent with **out-of-fold** Ridge predictions grouped by
+building (the same leakage guard as the notebook), and ranks listings by how
+far their actual rent sits below the prediction.
+
+```bash
+python web.py                       # http://127.0.0.1:5000
+python web.py --db rentals.db --port 8000
+```
+
+Each card shows a representative photo (the brightest apartment shot), the
+actual rent vs. the model's predicted rent, the % below/above market, and the
+Gemini/Claude photo-quality score. Filter by area / beds, sort by discount or
+quality, and toggle Underpriced / All / ❤ Liked / ✕ Passed views. You can ❤
+listings and triage them in **Tinder mode** (swipe / arrow keys, with undo) —
+both persist to the `listing_reactions` table. Suggestions are cached at
+startup; hit `/?refresh=1` after re-running the scorer. Requires a populated
+`rentals.db` (run the scrape → backfill → score pipeline first).
+
+### AI search
+
+Pass a model provider to enable natural-language search over the listings:
+
+```bash
+python web.py --provider anthropic --model claude-opus-4-8   # or --provider gemini
+```
+
+Ask things like *"like this but bigger"* (click ✨ on a card to set it as the
+reference) or *"based on what I've liked, find similar ones I haven't reviewed"*.
+**Cost is one small call per distinct question:** the model never sees the full
+listing set — it only receives compact facets + the reference + a profile of
+your likes, and returns a structured filter/ranking plan that the app executes
+locally. Plans are cached per (query, reference, likes), so repeats are free.
+Use `--model claude-haiku-4-5` (or `gemini-2.5-flash`) for the cheapest calls.
+Needs `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY` in `.env`; without it the UI runs
+normally with AI search disabled.
+
+### Semantic / taste matching (embeddings)
+
+For description-aware "vibe" search, embed listings once with a local
+sentence-transformers model (offline, no API cost):
+
+```bash
+python embed_listings.py            # embeds description + tags + basics
+```
+
+This unlocks two things in the web UI:
+
+- **🧭 Match my likes** — ranks the listings you haven't reviewed by similarity
+  to the centroid of your ❤ listings. Pure local vector math, **no model call**.
+- **Free-text vibe** — the AI-search plan adds a `semantic_query` ("charming
+  prewar with character and light"), which is embedded locally and blended into
+  the ranking, so descriptive wants beyond the structured fields/tags count.
+
+Embeddings are stored in `listing_embeddings` and re-run incrementally
+(`--rebuild` to force). If `embed_listings.py` hasn't been run, Match-my-likes
+is disabled and free-text search falls back to structured filters only.
 
 ## To do
 

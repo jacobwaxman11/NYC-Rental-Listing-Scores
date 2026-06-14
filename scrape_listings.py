@@ -11,12 +11,13 @@ newly-discovered listings get processed.
 Example:
     python scrape_listings.py \\
         --price-min 4000 --price-max 6000 \\
-        --areas 115,158,113,146,140 \\
+        --areas west-village,soho,williamsburg \\
         --max-listings 100
 
-Area IDs (a few common ones):
-    115 = Gramercy, 158 = Flatiron, 113 = Chelsea,
-    146 = Hudson Yards, 140 = Upper East Side
+Areas are StreetEasy neighborhood slugs — grab one from a
+``streeteasy.com/for-rent/<slug>`` URL. Examples: west-village, soho, nolita,
+tribeca, les (Lower East Side), williamsburg, greenpoint, dumbo, hoboken,
+jersey-city. Legacy numeric area IDs (e.g. 115) still work too.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 import db as dbm
+import poll_state
 
 
 HEADERS = {
@@ -50,11 +52,30 @@ HEADERS = {
 # ── URL + parsing helpers ────────────────────────────────────────────────────
 
 
-def build_url(price_min: int, price_max: int, area_ids: list[int], page: int = 1) -> str:
-    areas = ",".join(str(a) for a in area_ids)
-    path = f"/for-rent/nyc/price:{price_min}-{price_max}|area:{areas}"
+def build_url(price_min: int, price_max: int, area: str, page: int = 1,
+              sort: str = "listed_desc") -> str:
+    """Build a search URL for ONE StreetEasy area.
+
+    ``area`` is either a neighborhood slug — the reliable, human-readable form,
+    e.g. ``west-village``, ``williamsburg``, ``hoboken`` (grab it from a
+    ``streeteasy.com/for-rent/<slug>`` URL) — or a legacy numeric area ID. Slugs
+    use ``/for-rent/<slug>/…``; numeric IDs use ``/for-rent/nyc/…|area:<id>``.
+
+    ``sort`` defaults to ``listed_desc`` (newest first) so delta polling can
+    early-stop once it reaches already-known listings.
+    """
+    area = str(area).strip()
+    if area.isdigit():
+        path = f"/for-rent/nyc/price:{price_min}-{price_max}|area:{area}"
+    else:
+        path = f"/for-rent/{area}/price:{price_min}-{price_max}"
+    params = []
+    if sort:
+        params.append(f"sort_by={sort}")
     if page > 1:
-        path += f"?page={page}"
+        params.append(f"page={page}")
+    if params:
+        path += "?" + "&".join(params)
     return f"https://streeteasy.com{path}"
 
 
@@ -210,13 +231,14 @@ def scrape(
     db_path: str,
     price_min: int,
     price_max: int,
-    area_ids: list[int],
+    areas: list[str],
     max_listings: Optional[int],
     max_pages: int,
     image_dir: str,
     skip_images: bool,
     min_delay: float,
     max_delay: float,
+    full: bool = False,
 ) -> None:
     os.makedirs(image_dir, exist_ok=True)
 
@@ -226,45 +248,65 @@ def scrape(
             print(f"Resuming — {len(existing_ids)} listings already in {db_path}")
         else:
             print(f"Starting fresh (no existing entries in {db_path})")
+        print(f"Last scrape: {poll_state.ago(poll_state.last(conn, 'scrape'))}"
+              + ("  ·  --full re-crawl" if full else "  ·  delta mode (newest-first, early-stop)"))
 
         new_to_process: list[dict] = []
 
         with httpx.Client(headers=HEADERS, follow_redirects=True) as client:
-            # ── Stage 1: search pages ────────────────────────────────────────
-            # Keep paginating until we've queued max_listings NEW listings (or
-            # we run out of pages). Listings already in the DB are skipped.
-            for page in range(1, max_pages + 1):
+            # ── Stage 1: search pages, one StreetEasy area at a time ─────────
+            # ``max_listings`` is a GLOBAL cap across all areas. For each area we
+            # paginate until it runs out of pages (or we hit the cap). Listings
+            # already in the DB — or already queued from another area — are
+            # skipped, so overlapping areas don't double-count.
+            for area in areas:
                 if max_listings is not None and len(new_to_process) >= max_listings:
                     break
+                print(f"\n══ Area: {area} ══════════════════════════════════════")
 
-                print(f"\n── Search page {page} ──────────────────────────────────")
-                url = build_url(price_min, price_max, area_ids, page)
-                page_listings = fetch_search_page(url, client)
-
-                if not page_listings:
-                    print("  (no listings returned — stopping pagination)")
-                    break
-
-                dup_count = 0
-                for listing in page_listings:
-                    lid = listing.get("listing_id")
-                    if lid and lid in existing_ids:
-                        dup_count += 1
-                        continue
-                    new_to_process.append(listing)
-                    existing_ids.add(lid)  # avoid in-page duplicates too
+                for page in range(1, max_pages + 1):
                     if max_listings is not None and len(new_to_process) >= max_listings:
                         break
 
-                if dup_count:
-                    print(f"  ↺ {dup_count} already in DB, skipping")
+                    print(f"── {area} · page {page} ──")
+                    url = build_url(price_min, price_max, area, page)
+                    page_listings = fetch_search_page(url, client)
 
-                if page < max_pages:
+                    if not page_listings:
+                        print("  (no listings — on to the next area)")
+                        break
+
+                    before = len(new_to_process)
+                    for listing in page_listings:
+                        lid = listing.get("listing_id")
+                        if lid and lid in existing_ids:
+                            continue
+                        new_to_process.append(listing)
+                        existing_ids.add(lid)  # avoid cross-area / in-page dups too
+                        if max_listings is not None and len(new_to_process) >= max_listings:
+                            break
+
+                    new_this_page = len(new_to_process) - before
+                    dup_count = len(page_listings) - new_this_page
+                    if dup_count:
+                        print(f"  ↺ {dup_count} already seen, skipping")
+
+                    # ── Delta early-stop ─────────────────────────────────────
+                    # Results are sorted newest-first, so a page with no new
+                    # listings means we've reached already-known territory —
+                    # everything beyond it is older and already in the DB. Stop
+                    # this area (unless --full forces a complete re-crawl).
+                    if not full and new_this_page == 0:
+                        print("  ✓ no new listings here — delta stop "
+                              "(--full to re-crawl everything)")
+                        break
+
                     delay = random.uniform(min_delay, max_delay)
-                    print(f"  sleeping {delay:.1f}s before next page...")
+                    print(f"  sleeping {delay:.1f}s...")
                     time.sleep(delay)
 
             print(f"\n── {len(new_to_process)} new listings to process ──")
+            poll_state.record(conn, "scrape")   # we polled, regardless of yield
 
             if not new_to_process:
                 print("Nothing new to scrape. Exiting.")
@@ -306,12 +348,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--areas",
         type=str,
-        # FULL LIST:
-        # Financial District, Tribeca, Stuyvesant Town/PCV, Gramercy Park, Chelsea
-        # Greenwich Village, East Village, Murray Hill, Sutton Place, Turtle Bay
-        # Kips Bay, Upper East Side, Hudson Yards, Hell's Kitchen, West Village, Flatiron, Nolita
-        default="104,105,106,113,115,116,117,157,158,162,133,130,131,132,152,146,140",
-        help="Comma-separated StreetEasy area IDs",
+        default=(
+            "financial-district,battery-park-city,fulton-seaport,civic-center,tribeca,"
+            "soho,nolita,little-italy,chinatown,les,west-village,greenwich-village,"
+            "east-village,noho,chelsea,west-chelsea,flatiron,nomad,gramercy-park,"
+            "murray-hill,kips-bay,hudson-yards,hells-kitchen"
+        ),
+        help="Comma-separated StreetEasy neighborhood slugs (e.g. "
+             "west-village,williamsburg,hoboken). Grab a slug from a "
+             "streeteasy.com/for-rent/<slug> URL. Legacy numeric area IDs also work.",
     )
     p.add_argument(
         "--max-listings",
@@ -329,24 +374,28 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--skip-images", action="store_true", help="Skip image downloads")
     p.add_argument("--min-delay", type=float, default=2.0, help="Min polite delay between requests (s)")
     p.add_argument("--max-delay", type=float, default=4.0, help="Max polite delay between requests (s)")
+    p.add_argument("--full", action="store_true",
+                   help="Re-crawl every page instead of delta early-stopping at the "
+                        "first page with no new listings (newest-first sort)")
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    area_ids = [int(a.strip()) for a in args.areas.split(",") if a.strip()]
+    areas = [a.strip() for a in args.areas.split(",") if a.strip()]
 
     scrape(
         db_path=args.db,
         price_min=args.price_min,
         price_max=args.price_max,
-        area_ids=area_ids,
+        areas=areas,
         max_listings=args.max_listings,
         max_pages=args.max_pages,
         image_dir=args.image_dir,
         skip_images=args.skip_images,
         min_delay=args.min_delay,
         max_delay=args.max_delay,
+        full=args.full,
     )
 
 

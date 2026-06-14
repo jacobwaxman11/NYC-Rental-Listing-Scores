@@ -9,17 +9,24 @@ Design notes:
   - Listings are NEVER deleted. We only add to fields that are not yet populated.
   - A listing is considered "needs backfill" when its `listing_amenities` table
     has no rows for it.
-  - We use `curl_cffi` (mimics Chrome's TLS fingerprint) instead of `httpx`,
-    which gets through PerimeterX in most cases where plain Python clients fail.
+  - We use `curl_cffi` (mimics a real browser's TLS fingerprint) instead of
+    `httpx`, which gets through PerimeterX in most cases where plain Python
+    clients fail.
+  - `--impersonate` takes one OR MORE fingerprints (comma-separated). PerimeterX
+    sometimes flags one browser's JA3/TLS signature but not another's (e.g.
+    Chrome blocked while Safari still works). On a 403 we rotate to the next
+    fingerprint and retry the same listing, sticking with the first one that
+    works. Only when EVERY fingerprint is blocked do we treat it as an IP-level
+    block and terminate — that signals the IP has been flagged, and continuing
+    risks a longer block. Re-run later.
   - Default delays are intentionally generous (5–12s) to avoid bans.
-  - On the first 403 we **terminate immediately** — that signals the IP has
-    been flagged, and continuing risks a longer block. Re-run later.
   - Saves are incremental (one commit per listing), so a Ctrl-C or 403 mid-run
     keeps everything we've already backfilled.
 
 Example:
     python backfill_details.py
     python backfill_details.py --max-listings 50 --min-delay 8 --max-delay 15
+    python backfill_details.py --only-missing   # skip already-fetched listings
 """
 
 from __future__ import annotations
@@ -47,6 +54,7 @@ except ImportError as e:
 from scrape_listings import _download_one
 
 import db as dbm
+import poll_state
 
 
 HEADERS = {
@@ -191,17 +199,28 @@ def run(
     max_listings: Optional[int],
     min_delay: float,
     max_delay: float,
-    impersonate: str,
+    fingerprints: list[str],
     timeout: int,
+    only_missing: bool,
 ) -> int:
     """Returns the exit code (0 = ok, 2 = stopped on 403)."""
     with dbm.open_db(db_path) as conn:
-        todo = dbm.listings_missing_amenities(conn)
+        if only_missing:
+            # Only listings we've never fetched a detail page for. This skips
+            # listings that were already attempted but came back with no
+            # amenities, so re-runs don't keep re-hitting them.
+            todo = dbm.listings_never_fetched(conn)
+            mode = "never-fetched"
+        else:
+            todo = dbm.listings_missing_amenities(conn)
+            mode = "missing-amenities"
         total = dbm.stats(conn)["listings"]
         print(
             f"DB: {db_path} — {total} listings total; "
-            f"{len(todo)} need detail backfill."
+            f"{len(todo)} need detail backfill (mode: {mode})."
         )
+        print(f"Last backfill: {poll_state.ago(poll_state.last(conn, 'backfill'))}")
+        poll_state.record(conn, "backfill")
 
         if max_listings is not None:
             todo = todo[:max_listings]
@@ -211,8 +230,18 @@ def run(
             print("Nothing to do. Exiting.")
             return 0
 
-        session = cffi_requests.Session(impersonate=impersonate)
-        print(f"Using curl_cffi with impersonate={impersonate!r}\n")
+        # One session per fingerprint, created lazily and reused. ``fp_idx``
+        # persists across listings, so once a fingerprint gets through we keep
+        # using it instead of re-trying a blocked one on every listing.
+        sessions: dict[str, "cffi_requests.Session"] = {}
+
+        def get_session(fp: str) -> "cffi_requests.Session":
+            if fp not in sessions:
+                sessions[fp] = cffi_requests.Session(impersonate=fp)
+            return sessions[fp]
+
+        fp_idx = 0
+        print(f"Using curl_cffi — fingerprint rotation order: {fingerprints}\n")
 
         processed = 0
         succeeded = 0
@@ -231,12 +260,25 @@ def run(
             time.sleep(delay)
 
             print(f"  → GET {url}")
-            detail, status = fetch_detail(url, session, timeout=timeout)
+            # Try the current fingerprint; on a 403 rotate to the next and retry
+            # the same listing. Only a 403 from EVERY fingerprint counts as a
+            # (likely IP-level) block worth terminating on.
+            detail, status = None, None
+            for attempt in range(len(fingerprints)):
+                fp = fingerprints[fp_idx]
+                detail, status = fetch_detail(url, get_session(fp), timeout=timeout)
+                if status != 403:
+                    break
+                print(f"  ⚠ 403 with impersonate={fp!r} — rotating fingerprint...")
+                fp_idx = (fp_idx + 1) % len(fingerprints)
+                if attempt < len(fingerprints) - 1:
+                    time.sleep(random.uniform(min_delay, max_delay))
             processed += 1
 
             if status == 403:
                 print(
-                    "\n!!! 403 (PerimeterX) — terminating to avoid further bans. !!!\n"
+                    f"\n!!! 403 from ALL fingerprints ({', '.join(fingerprints)}) "
+                    "— likely an IP-level block. Terminating to avoid further bans. !!!\n"
                     f"Processed {processed - 1} successful, "
                     f"{n - processed} skipped, before block.\n"
                     "Re-run later (try a longer delay or a different IP/VPN)."
@@ -270,7 +312,10 @@ def run(
                     **listing,
                     "floor_plan_url": floor_plan_url,
                 }
-                fp_path = maybe_download_floor_plan(fp_payload, image_dir, session)
+                # Reuse the fingerprint that just succeeded for this listing.
+                fp_path = maybe_download_floor_plan(
+                    fp_payload, image_dir, get_session(fingerprints[fp_idx])
+                )
                 if fp_path:
                     dbm.update_listing_fields(
                         conn, listing["listing_id"], {"local_floor_plan_path": fp_path}
@@ -322,8 +367,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--impersonate",
         type=str,
-        default="chrome131",
-        help="curl_cffi browser fingerprint (chrome120, chrome116, safari17_0, etc.)",
+        default="safari180,safari170,chrome131,firefox144",
+        help="curl_cffi browser fingerprint(s), comma-separated. On a 403 the "
+             "scraper rotates to the next one and retries, so listing several "
+             "browsers/engines (e.g. 'safari180,chrome131,firefox144') routes "
+             "around a fingerprint-specific block. Terminates only when all are "
+             "blocked. Single value also works (e.g. 'safari180').",
     )
     p.add_argument(
         "--timeout",
@@ -331,19 +380,32 @@ def parse_args() -> argparse.Namespace:
         default=20,
         help="Per-request timeout in seconds",
     )
+    p.add_argument(
+        "--only-missing",
+        action="store_true",
+        help="Only fetch listings whose detail page has never been fetched "
+             "(detail_fetched_at IS NULL). Skips listings already attempted, "
+             "even ones that came back with no amenities — so re-runs don't "
+             "keep re-hitting the same listings. Without this flag, any "
+             "listing with an empty amenities table is (re)fetched.",
+    )
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    fingerprints = [fp.strip() for fp in args.impersonate.split(",") if fp.strip()]
+    if not fingerprints:
+        raise SystemExit("--impersonate must list at least one fingerprint")
     code = run(
         db_path=args.db,
         image_dir=args.image_dir,
         max_listings=args.max_listings,
         min_delay=args.min_delay,
         max_delay=args.max_delay,
-        impersonate=args.impersonate,
+        fingerprints=fingerprints,
         timeout=args.timeout,
+        only_missing=args.only_missing,
     )
     sys.exit(code)
 

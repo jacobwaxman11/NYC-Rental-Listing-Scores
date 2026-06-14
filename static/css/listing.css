@@ -1,0 +1,99 @@
+/* Listing detail page — consumer-style layout. Design tokens (--bg, --card,
+   --line, --txt, --muted, --good, --bad, --accent, --heart) come from index.css. */
+
+.d-head { position:sticky; top:0; z-index:40; background:var(--bg);
+          border-bottom:1px solid var(--line); }
+.d-head .back { color:var(--accent); text-decoration:none; font-size:14px; }
+.d-head h1 { font-size:18px; }
+.d-head .brand .logo { width:25px; height:25px; }
+
+.detail { max-width:1080px; margin:0 auto; padding:22px;
+          display:grid; grid-template-columns:1.6fr 1fr; gap:22px; align-items:start; }
+/* Gallery + content blocks live in the main (left) column. The summary spans
+   the full height of the right column so its sticky behaviour follows you as
+   you scroll the description and map — not just the gallery row (which made it
+   look frozen/static). */
+.detail > .gallery { grid-column:1; }
+.detail > .summary { grid-column:2; grid-row:1 / span 99; }
+.detail > .block, .detail > .map-block { grid-column:1; }
+/* Grid items default to min-width:auto, so a long unbreakable word (e.g. a URL
+   in the description) would force a track wider than the viewport and require
+   zooming out. Letting items shrink to 0 keeps the page at viewport width. */
+.detail > * { min-width:0; }
+
+/* Gallery */
+.gallery { display:flex; flex-direction:column; gap:10px; }
+.g-main { position:relative; aspect-ratio:4/3; border-radius:16px; overflow:hidden;
+          background:#0b0d11 center/cover no-repeat; box-shadow:0 12px 36px rgba(0,0,0,.4);
+          cursor:pointer; }
+.g-main.empty { display:flex; align-items:center; justify-content:center;
+                color:var(--muted); cursor:default; }
+.g-nav { position:absolute; top:50%; transform:translateY(-50%); width:44px; height:44px;
+         border:none; border-radius:50%; background:rgba(0,0,0,.5); color:#fff;
+         font-size:26px; line-height:1; cursor:pointer; opacity:.7; transition:opacity .15s; }
+.g-nav:hover { opacity:1; }
+.g-nav.left { left:12px; } .g-nav.right { right:12px; }
+.g-count { position:absolute; bottom:12px; right:12px; background:rgba(0,0,0,.6);
+           color:#fff; font-size:12px; font-weight:600; padding:3px 10px; border-radius:999px; }
+.g-thumbs { display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; }
+.g-thumb { flex:0 0 84px; height:62px; border-radius:9px; cursor:pointer;
+           background:#0b0d11 center/cover no-repeat; border:2px solid transparent;
+           opacity:.65; transition:opacity .15s, border-color .15s; }
+.g-thumb:hover { opacity:1; }
+.g-thumb.sel { opacity:1; border-color:var(--accent); }
+
+/* Summary card */
+.summary { background:var(--card); border:1px solid var(--line); border-radius:16px;
+           padding:20px; display:flex; flex-direction:column; gap:14px; position:sticky; top:74px; }
+.s-price .rent { font-size:30px; font-weight:750; }
+.s-price .mo { font-size:15px; color:var(--muted); font-weight:500; }
+.s-price .badge { display:inline-block; margin-top:8px; padding:4px 11px; border-radius:999px;
+                  font-size:12px; font-weight:650; }
+.badge.good { background:rgba(52,211,153,.16); color:var(--good); }
+.badge.bad  { background:rgba(248,113,113,.16); color:var(--bad); }
+.model-note { color:var(--muted); font-size:13px; margin-top:6px; }
+.s-addr { font-size:20px; font-weight:650; }
+.s-sub { color:var(--muted); font-size:14px; margin-top:-8px; }
+.s-facts { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; text-align:center;
+           border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:14px 0; }
+.s-facts b { display:block; font-size:18px; }
+.s-facts span { color:var(--muted); font-size:12px; }
+.s-extra { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:7px; }
+.s-extra li { display:flex; justify-content:space-between; font-size:14px; }
+.s-extra li span { color:var(--muted); }
+/* Tinder-style round like/pass buttons; filled when that reaction is active. */
+.s-actions { display:flex; gap:20px; justify-content:center; margin-top:4px; }
+.s-actions .t-btn { width:60px; height:60px; font-size:24px; line-height:1;
+                    display:flex; align-items:center; justify-content:center; }
+.s-actions .t-btn.like { color:var(--heart); }
+.s-actions .t-btn.pass.on { background:var(--bad); color:#fff; border-color:var(--bad); }
+.s-actions .t-btn.like.on { background:var(--heart); color:#fff; border-color:var(--heart); }
+.act { flex:1; text-align:center; border-radius:11px; padding:12px; font-size:14px;
+       font-weight:650; cursor:pointer; text-decoration:none; border:1px solid var(--line);
+       background:var(--card); color:var(--txt); }
+.act.heart.on { color:var(--heart); border-color:var(--heart); }
+.act.pass.on { color:var(--bad); border-color:var(--bad); }
+.act.primary { background:linear-gradient(135deg,#60a5fa,#34d399); color:#06281f; border:none; }
+.act.wide { width:100%; display:block; box-sizing:border-box; }
+
+/* Content blocks */
+.block { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px; }
+.block h2 { font-size:16px; margin:0 0 12px; }
+.desc p { margin:0; white-space:pre-line; color:var(--txt); line-height:1.65;
+          overflow-wrap:anywhere; word-break:break-word; }
+.chips { display:flex; flex-wrap:wrap; gap:8px; }
+.chip-a { font-size:13px; background:#1f2734; border:1px solid var(--line); color:var(--txt);
+          border-radius:8px; padding:5px 11px; text-decoration:none; }
+.chip-a.tag { color:var(--muted); }
+.chip-a.tag:hover { color:var(--accent); border-color:var(--accent); }
+
+/* Map */
+#map { height:360px; border-radius:12px; overflow:hidden; }
+.leaflet-container { background:#0b0d11; }
+
+@media (max-width:760px) {
+  .detail { grid-template-columns:1fr; padding:14px; }
+  /* Single column: summary flows back into place (right after the gallery) and
+     stops sticking. */
+  .detail > .summary { grid-column:1; grid-row:auto; position:static; }
+}

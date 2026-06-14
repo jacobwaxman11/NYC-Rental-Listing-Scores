@@ -1,153 +1,37 @@
-"""Score apartment photos with Gemini and persist results to SQLite.
+"""Score apartment photos with Gemini or Claude and persist results to SQLite.
 
 Reads listings (and their image URLs/local paths) from ``rentals.db``, scores
-each unseen image with Gemini, and writes per-image scores + per-listing
-aggregates back into the same DB.
+each unseen image with the chosen vision model, and writes per-image scores +
+per-listing aggregates back into the same DB.
 
-Example:
-    python score_listings.py --max-listings 10 --model gemini-2.5-flash
+Two providers are supported and produce the same score shape, so they can be
+compared head to head:
 
-Requires GOOGLE_API_KEY in the environment (or in a .env file).
+    # Gemini (default)
+    python score_listings.py --provider gemini --model gemini-2.5-flash
+
+    # Claude
+    python score_listings.py --provider anthropic --model claude-opus-4-8
+
+Requires GOOGLE_API_KEY (Gemini) or ANTHROPIC_API_KEY (Claude) in the
+environment, or in a .env file.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
-import mimetypes
 import os
 import sqlite3
 import time
-from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 
 import db as dbm
+from scorers import PROVIDER_DEFAULT_MODELS, Scorer, build_scorer
 
-
-SYSTEM_PROMPT = (
-    "You are a real estate analyst evaluating listing photos for NYC rental "
-    "apartments. Be precise and return only valid JSON."
-)
-
-SCORE_PROMPT = """You will receive one or more listing photos in a single request.
-For EACH image, classify it, then score it.
-
-Return a single JSON ARRAY with one object per image, in the SAME ORDER the
-images were provided. Do not wrap the array in any other object, do not add
-commentary. If a single image is provided, still return an array of length 1.
-
-Each array element MUST have this exact shape:
-{
-  "image_category": "apartment" | "common_space" | "irrelevant",
-  "apartment_scores": { ... } | null,
-  "common_space_scores": { ... } | null,
-  "irrelevant_reason": "..." | null
-}
-
-Classification rules:
-- "apartment": inside the specific rental unit (living room, bedroom, kitchen,
-  bathroom, private balcony/terrace, in-unit laundry closet, floor plan of the unit).
-- "common_space": shared building areas (lobby, hallway, elevator, gym, pool,
-  rooftop/roof deck, courtyard, shared laundry room, building exterior / facade,
-  doorman desk, bike room, package room, mail room).
-- "irrelevant": anything not useful for judging this listing — map/street view,
-  neighborhood photo, logo, floor plan diagram for an unrelated unit, stock photo,
-  text-only advertisement, watermarked placeholder, or unclear/unusable image.
-
-If image_category = "apartment", populate "apartment_scores" and set the other two to null:
-{
-  "room_type": "living_room" | "kitchen" | "bedroom" | "bathroom" |
-               "balcony_terrace" | "floor_plan" | "other_apartment",
-  "natural_light": 1-10,
-  "finish_quality": 1-10,
-  "space_feeling": 1-10,
-  "view_quality": 1-10,
-  "condition": 1-10
-}
-
-If image_category = "common_space", populate "common_space_scores" and set the others to null:
-{
-  "space_type": "lobby" | "hallway" | "gym" | "pool" | "rooftop" | "courtyard" |
-                "laundry_room" | "exterior" | "package_room" | "bike_room" | "other_common",
-  "finish_quality": 1-10,
-  "condition": 1-10,
-  "appeal": 1-10
-}
-
-If image_category = "irrelevant", set both *_scores to null and fill "irrelevant_reason"
-with a short phrase (e.g. "neighborhood map", "watermark placeholder", "street photo").
-
-Scoring guide (apartment):
-- natural_light: 1=dark/no windows, 10=bright/floor-to-ceiling windows
-- finish_quality: 1=carpet/basic, 10=hardwood/stone/high-end finishes
-- space_feeling: 1=cramped/cluttered, 10=open/airy/well-proportioned
-- view_quality: 1=brick wall/no view, 10=skyline/water/park view (if no window visible, score 5)
-- condition: 1=worn/dated, 10=brand new/pristine
-
-Scoring guide (common_space):
-- finish_quality: 1=basic/dated/builder-grade, 10=luxury materials and design
-- condition: 1=worn/dirty, 10=pristine
-- appeal: 1=uninviting/cramped, 10=impressive/desirable amenity
-
-IMPORTANT: the length of the returned array MUST equal the number of images
-provided. Do not combine, skip, or merge images."""
-
-
-# ── Scorer ───────────────────────────────────────────────────────────────────
-
-
-def score_image_batch(
-    paths: list[str],
-    client: genai.Client,
-    model_name: str,
-    timeout_ms: int,
-) -> list[Optional[dict]]:
-    """Send up to N images in one Gemini call and return one score dict per
-    image in the same order. On any failure, returns [None] * len(paths)."""
-    if not paths:
-        return []
-
-    try:
-        parts: list = [SCORE_PROMPT]
-        for path in paths:
-            data = Path(path).read_bytes()
-            mime = mimetypes.guess_type(path)[0] or "image/webp"
-            parts.append(types.Part.from_bytes(data=data, mime_type=mime))
-
-        response = client.models.generate_content(
-            model=model_name,
-            contents=parts,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                http_options=types.HttpOptions(timeout=timeout_ms),
-            ),
-        )
-
-        parsed = json.loads(response.text)
-        if not isinstance(parsed, list):
-            # Model occasionally returns a lone object for batch-of-one despite
-            # the instructions — tolerate it.
-            parsed = [parsed]
-
-        if len(parsed) != len(paths):
-            print(
-                f"    ! expected {len(paths)} results, got {len(parsed)} — "
-                f"padding with nulls"
-            )
-            parsed = list(parsed)[: len(paths)] + [None] * max(
-                0, len(paths) - len(parsed)
-            )
-
-        return parsed
-
-    except Exception as e:
-        print(f"    ✗ Batch API error: {e}")
-        return [None] * len(paths)
+# The provider scorers (Gemini/Claude) and their JSON/tag helpers live in
+# scorers.py; build_scorer / Scorer / PROVIDER_DEFAULT_MODELS are imported above.
 
 
 def aggregate_scores(image_scores: list[Optional[dict]]) -> dict:
@@ -248,10 +132,8 @@ def _log_score(idx: int, total: int, path: str, scores: Optional[dict]) -> None:
 def score_listing(
     conn: sqlite3.Connection,
     listing: dict,
-    client: genai.Client,
-    model_name: str,
+    scorer: Scorer,
     sleep_s: float,
-    timeout_ms: int,
     batch_size: int,
     max_images: int,
 ) -> dict:
@@ -308,12 +190,12 @@ def score_listing(
             f"({len(batch_paths)} image{'s' if len(batch_paths) != 1 else ''})"
         )
 
-        batch_scores = score_image_batch(batch_paths, client, model_name, timeout_ms)
+        batch_scores = scorer.score_batch(batch_paths)
 
         for idx, path, url, scores in zip(batch_idxs, batch_paths, batch_urls, batch_scores):
             raw_scores[idx] = scores
             if scores:
-                dbm.upsert_image_score(conn, url, scores, model_name)
+                dbm.upsert_image_score(conn, url, scores, scorer.model_name)
             _log_score(idx + 1, len(images), path, scores)
 
         # Commit progress after every batch so a crash doesn't lose the API
@@ -365,6 +247,7 @@ def _print_summary(s: dict) -> None:
 
 def run(
     db_path: str,
+    provider: str,
     model_name: str,
     max_listings: Optional[int],
     sleep_s: float,
@@ -375,13 +258,7 @@ def run(
 ) -> None:
     load_dotenv()
 
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        raise SystemExit(
-            "GOOGLE_API_KEY not set. Add it to your .env file or export it."
-        )
-
-    client = genai.Client(api_key=api_key)
+    scorer = build_scorer(provider, model_name, timeout_ms)
 
     with dbm.open_db(db_path) as conn:
         # Pick the queue. ``rescore`` re-aggregates everything (image scores
@@ -398,7 +275,8 @@ def run(
 
         already = dbm.stats(conn)["scored_images"]
         print(
-            f"DB: {db_path} — {already} images already scored, "
+            f"DB: {db_path} — provider={provider} model={model_name} — "
+            f"{already} images already scored, "
             f"{len(queue)} listing{'s' if len(queue) != 1 else ''} queued."
         )
 
@@ -409,10 +287,8 @@ def run(
             summary = score_listing(
                 conn,
                 listing,
-                client,
-                model_name,
+                scorer,
                 sleep_s,
-                timeout_ms,
                 batch_size=batch_size,
                 max_images=max_images,
             )
@@ -427,15 +303,24 @@ def run(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Score apartment photos with Gemini.",
+        description="Score apartment photos with Gemini or Claude.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--db", type=str, default=dbm.DEFAULT_DB_PATH, help="SQLite database path")
     p.add_argument(
+        "--provider",
+        type=str,
+        choices=["gemini", "anthropic"],
+        default="gemini",
+        help="Vision model provider",
+    )
+    p.add_argument(
         "--model",
         type=str,
-        default="gemini-2.5-flash",
-        help="Gemini model name (e.g. gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.5-pro)",
+        default=None,
+        help="Model name. Defaults per provider: gemini-2.5-flash (gemini), "
+             "claude-opus-4-8 (anthropic). Other examples: gemini-2.5-pro, "
+             "claude-haiku-4-5 (cheaper/faster).",
     )
     p.add_argument(
         "--max-listings",
@@ -447,13 +332,13 @@ def parse_args() -> argparse.Namespace:
         "--sleep",
         type=float,
         default=4,
-        help="Seconds to sleep between Gemini batch calls",
+        help="Seconds to sleep between batch calls",
     )
     p.add_argument(
         "--batch-size",
         type=int,
         default=5,
-        help="Number of images to send per Gemini API call",
+        help="Number of images to send per API call",
     )
     p.add_argument(
         "--max-images",
@@ -465,7 +350,7 @@ def parse_args() -> argparse.Namespace:
         "--timeout-ms",
         type=int,
         default=60_000,
-        help="Per-call Gemini HTTP timeout in milliseconds",
+        help="Per-call HTTP timeout in milliseconds",
     )
     p.add_argument(
         "--rescore",
@@ -478,9 +363,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    model_name = args.model or PROVIDER_DEFAULT_MODELS[args.provider]
     run(
         db_path=args.db,
-        model_name=args.model,
+        provider=args.provider,
+        model_name=model_name,
         max_listings=args.max_listings,
         sleep_s=args.sleep,
         timeout_ms=args.timeout_ms,

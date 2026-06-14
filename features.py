@@ -41,7 +41,7 @@ import numpy as np
 import pandas as pd
 
 
-DEFAULT_DB_PATH = "rentals.db"
+from config import DEFAULT_DB_PATH
 
 # Raw image-score columns loaded from listing_scores. These are collapsed
 # into two composites (apt_quality, common_quality) during engineering.
@@ -190,7 +190,7 @@ def engineer_features(
     df["sqft"] = df["sqft"].fillna(df["sqft"].median())
 
     # ── Bool/int normalization ───────────────────────────────────────────────
-    for col in ("has_floor_plan"):
+    for col in ("has_floor_plan",):   # note the comma: a 1-tuple, not a string
         if col in df.columns:
             df[col] = df[col].fillna(0).astype(int)
 
