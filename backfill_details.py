@@ -54,6 +54,7 @@ except ImportError as e:
 from scrape_listings import _download_one
 
 import db as dbm
+import poll_state
 
 
 HEADERS = {
@@ -218,6 +219,8 @@ def run(
             f"DB: {db_path} — {total} listings total; "
             f"{len(todo)} need detail backfill (mode: {mode})."
         )
+        print(f"Last backfill: {poll_state.ago(poll_state.last(conn, 'backfill'))}")
+        poll_state.record(conn, "backfill")
 
         if max_listings is not None:
             todo = todo[:max_listings]

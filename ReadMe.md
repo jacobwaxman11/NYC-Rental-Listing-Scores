@@ -33,6 +33,24 @@ python backfill_details.py --max-listings 50
 python score_listings.py  --max-listings 50
 ```
 
+### Delta polling (cheap periodic updates)
+
+Re-running is cheap by design, so you can poll on a schedule:
+
+- **scrape** sorts newest-first and **early-stops** each area at the first page
+  with no new listings — a periodic poll fetches ~1–2 search pages per area
+  instead of re-crawling everything. Pass `--full` for an occasional complete
+  re-crawl.
+- **backfill** with `--only-missing` only fetches detail pages it hasn't seen
+  (`detail_fetched_at IS NULL`); **score** / **embed** skip already-done work.
+- Each run records its time (in the `meta` table via `poll_state.py`) and prints
+  *"Last scrape: 6h ago"* / *"Last backfill: …"* at startup.
+
+```bash
+python scrape_listings.py    # delta: newest-first, early-stop
+python scrape_listings.py --full   # full re-crawl
+```
+
 ### Photo scoring provider
 
 `score_listings.py` can score photos with either Gemini or Claude. Both produce

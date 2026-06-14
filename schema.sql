@@ -115,3 +115,10 @@ CREATE TABLE IF NOT EXISTS listing_embeddings (
     vector       TEXT,            -- JSON array of floats
     embedded_at  TEXT
 );
+
+-- Generic key/value store for small pipeline bookkeeping (e.g. last-poll times).
+CREATE TABLE IF NOT EXISTS meta (
+    key         TEXT PRIMARY KEY,
+    value       TEXT,
+    updated_at  TEXT
+);

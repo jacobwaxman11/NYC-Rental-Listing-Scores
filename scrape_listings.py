@@ -34,6 +34,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 import db as dbm
+import poll_state
 
 
 HEADERS = {
@@ -51,21 +52,30 @@ HEADERS = {
 # ── URL + parsing helpers ────────────────────────────────────────────────────
 
 
-def build_url(price_min: int, price_max: int, area: str, page: int = 1) -> str:
+def build_url(price_min: int, price_max: int, area: str, page: int = 1,
+              sort: str = "listed_desc") -> str:
     """Build a search URL for ONE StreetEasy area.
 
     ``area`` is either a neighborhood slug — the reliable, human-readable form,
     e.g. ``west-village``, ``williamsburg``, ``hoboken`` (grab it from a
     ``streeteasy.com/for-rent/<slug>`` URL) — or a legacy numeric area ID. Slugs
     use ``/for-rent/<slug>/…``; numeric IDs use ``/for-rent/nyc/…|area:<id>``.
+
+    ``sort`` defaults to ``listed_desc`` (newest first) so delta polling can
+    early-stop once it reaches already-known listings.
     """
     area = str(area).strip()
     if area.isdigit():
         path = f"/for-rent/nyc/price:{price_min}-{price_max}|area:{area}"
     else:
         path = f"/for-rent/{area}/price:{price_min}-{price_max}"
+    params = []
+    if sort:
+        params.append(f"sort_by={sort}")
     if page > 1:
-        path += f"?page={page}"
+        params.append(f"page={page}")
+    if params:
+        path += "?" + "&".join(params)
     return f"https://streeteasy.com{path}"
 
 
@@ -228,6 +238,7 @@ def scrape(
     skip_images: bool,
     min_delay: float,
     max_delay: float,
+    full: bool = False,
 ) -> None:
     os.makedirs(image_dir, exist_ok=True)
 
@@ -237,6 +248,8 @@ def scrape(
             print(f"Resuming — {len(existing_ids)} listings already in {db_path}")
         else:
             print(f"Starting fresh (no existing entries in {db_path})")
+        print(f"Last scrape: {poll_state.ago(poll_state.last(conn, 'scrape'))}"
+              + ("  ·  --full re-crawl" if full else "  ·  delta mode (newest-first, early-stop)"))
 
         new_to_process: list[dict] = []
 
@@ -263,25 +276,37 @@ def scrape(
                         print("  (no listings — on to the next area)")
                         break
 
-                    dup_count = 0
+                    before = len(new_to_process)
                     for listing in page_listings:
                         lid = listing.get("listing_id")
                         if lid and lid in existing_ids:
-                            dup_count += 1
                             continue
                         new_to_process.append(listing)
                         existing_ids.add(lid)  # avoid cross-area / in-page dups too
                         if max_listings is not None and len(new_to_process) >= max_listings:
                             break
 
+                    new_this_page = len(new_to_process) - before
+                    dup_count = len(page_listings) - new_this_page
                     if dup_count:
                         print(f"  ↺ {dup_count} already seen, skipping")
+
+                    # ── Delta early-stop ─────────────────────────────────────
+                    # Results are sorted newest-first, so a page with no new
+                    # listings means we've reached already-known territory —
+                    # everything beyond it is older and already in the DB. Stop
+                    # this area (unless --full forces a complete re-crawl).
+                    if not full and new_this_page == 0:
+                        print("  ✓ no new listings here — delta stop "
+                              "(--full to re-crawl everything)")
+                        break
 
                     delay = random.uniform(min_delay, max_delay)
                     print(f"  sleeping {delay:.1f}s...")
                     time.sleep(delay)
 
             print(f"\n── {len(new_to_process)} new listings to process ──")
+            poll_state.record(conn, "scrape")   # we polled, regardless of yield
 
             if not new_to_process:
                 print("Nothing new to scrape. Exiting.")
@@ -349,6 +374,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--skip-images", action="store_true", help="Skip image downloads")
     p.add_argument("--min-delay", type=float, default=2.0, help="Min polite delay between requests (s)")
     p.add_argument("--max-delay", type=float, default=4.0, help="Max polite delay between requests (s)")
+    p.add_argument("--full", action="store_true",
+                   help="Re-crawl every page instead of delta early-stopping at the "
+                        "first page with no new listings (newest-first sort)")
     return p.parse_args()
 
 
@@ -367,6 +395,7 @@ def main() -> None:
         skip_images=args.skip_images,
         min_delay=args.min_delay,
         max_delay=args.max_delay,
+        full=args.full,
     )
 
 
