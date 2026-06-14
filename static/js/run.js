@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 const logEl = $('log'), dot = $('dot'), statusEl = $('status'), stopBtn = $('stop');
 const runBtns = document.querySelectorAll('button.run');
+const runAllBtn = $('run-all');
 let cursor = 0, polling = false;
 
 // ── Custom dropdowns (single + multi-select), styled like the deals page ──────
@@ -82,6 +83,7 @@ function setStatus(s) {
   statusEl.textContent = s || 'idle';
   const running = s === 'running';
   runBtns.forEach(b => b.disabled = running);
+  if (runAllBtn) runAllBtn.disabled = running;
   stopBtn.disabled = !running;
 }
 
@@ -114,6 +116,22 @@ runBtns.forEach(b => b.addEventListener('click', async () => {
   if (!d.ok) { logEl.textContent = '⚠ ' + d.error; return; }
   setStatus('running'); ensurePolling();
 }));
+
+// Run the whole pipeline (scrape → backfill → score) as one server-side job.
+if (runAllBtn) runAllBtn.addEventListener('click', async () => {
+  if (csValue('areas').length === 0) {
+    logEl.textContent = '⚠ Select at least one area to scrape.';
+    return;
+  }
+  logEl.textContent = ''; cursor = 0;
+  const body = { scrape: PARAMS.scrape(), backfill: PARAMS.backfill(), score: PARAMS.score() };
+  const d = await (await fetch('/api/run/all', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })).json();
+  if (!d.ok) { logEl.textContent = '⚠ ' + d.error; return; }
+  setStatus('running'); ensurePolling();
+});
 
 stopBtn.addEventListener('click', () => fetch('/api/run/stop', { method: 'POST' }));
 

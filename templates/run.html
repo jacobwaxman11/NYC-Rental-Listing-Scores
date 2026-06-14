@@ -12,6 +12,14 @@
 <div class="wrap">
   <div class="panel">
 
+    <div class="stage run-all-stage">
+      <h2>▶ Run everything</h2>
+      <p>Runs scrape → backfill → score back-to-back using the settings below.
+        It keeps running on the server, so you can close this tab and come back
+        later. Stops the chain if a stage fails.</p>
+      <button class="run-all" id="run-all">▶ Run all (scrape → backfill → score)</button>
+    </div>
+
     <div class="stage">
       <h2>1 · Scrape listings</h2>
       <p>Search StreetEasy and download photos. Re-runs only fetch new listings.</p>
@@ -83,7 +91,8 @@
     </div>
     <pre id="log" class="log"></pre>
     <div class="hint">Output streams live. A job keeps running if you navigate away —
-      come back here to watch it. Only one stage runs at a time.</div>
+      come back here to watch it. One job runs at a time; “Run all” chains the
+      three stages on the server.</div>
   </div>
 </div>
 {% endblock %}

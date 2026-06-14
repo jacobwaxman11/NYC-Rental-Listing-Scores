@@ -25,6 +25,11 @@ button.run { margin-top:14px; width:100%; border:none; border-radius:9px;
   padding:10px; font-weight:700; font-size:14px; cursor:pointer;
   background:linear-gradient(135deg,#60a5fa,#34d399); color:#06281f; }
 button.run:disabled { opacity:.4; cursor:default; }
+.run-all-stage { border-color:#3a4252; }
+button.run-all { margin-top:8px; width:100%; border:none; border-radius:9px;
+  padding:12px; font-weight:750; font-size:15px; cursor:pointer; color:#fff;
+  background:linear-gradient(135deg,#fb7185,#f59e0b); }
+button.run-all:disabled { opacity:.4; cursor:default; }
 
 /* custom dropdowns — matched to the main deals page (.cs / .cs-btn / .cs-menu) */
 .cs { position:relative; user-select:none; }

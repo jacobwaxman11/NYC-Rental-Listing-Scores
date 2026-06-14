@@ -143,30 +143,13 @@ def _build_argv(stage: str, params: dict) -> list[str]:
     return argv
 
 
-def _job_reader(proc: "subprocess.Popen") -> None:
-    """Stream a running job's output into the shared buffer until it exits."""
-    assert proc.stdout is not None
-    for line in iter(proc.stdout.readline, ""):
-        with _JOB_LOCK:
-            _JOB["lines"].append(line.rstrip("\n"))
-    proc.stdout.close()
-    rc = proc.wait()
-    with _JOB_LOCK:
-        _JOB["returncode"] = rc
-        if _JOB["status"] == "running":
-            _JOB["status"] = "done" if rc == 0 else "failed"
-        _JOB["lines"].append(f"── process exited with code {rc} ──")
+# The order stages run in when "Run all" chains the whole pipeline.
+PIPELINE_ORDER = ["scrape", "backfill", "score"]
 
 
-def start_job(stage: str, params: dict) -> tuple[bool, str]:
-    """Spawn a stage. Returns (started, message)."""
-    with _JOB_LOCK:
-        if _JOB["status"] == "running":
-            return False, "A job is already running — wait for it to finish or stop it."
-        argv = _build_argv(stage, params)
-        _JOB.update(stage=stage, status="running", lines=[], returncode=None, proc=None)
-        _JOB["lines"].append("$ python " + " ".join(argv))
-
+def _spawn(stage: str, params: dict) -> "subprocess.Popen":
+    """Start one stage's subprocess and record it as the current job's proc."""
+    argv = _build_argv(stage, params)
     proc = subprocess.Popen(
         [sys.executable, "-u", *argv],
         cwd=_REPO_DIR,
@@ -176,8 +159,62 @@ def start_job(stage: str, params: dict) -> tuple[bool, str]:
         bufsize=1,
     )
     with _JOB_LOCK:
+        _JOB["stage"] = stage
         _JOB["proc"] = proc
-    threading.Thread(target=_job_reader, args=(proc,), daemon=True).start()
+        _JOB["lines"].append("$ python " + " ".join(argv))
+    return proc
+
+
+def _stream(proc: "subprocess.Popen") -> int:
+    """Stream a proc's output into the shared buffer; return its exit code."""
+    assert proc.stdout is not None
+    for line in iter(proc.stdout.readline, ""):
+        with _JOB_LOCK:
+            _JOB["lines"].append(line.rstrip("\n"))
+    proc.stdout.close()
+    return proc.wait()
+
+
+def _worker(items: list) -> None:
+    """Run a sequence of (stage, params) in order. Each stage streams live; the
+    chain stops on a non-zero exit or if the user hits Stop. A single-stage list
+    behaves exactly like running that one stage."""
+    seq = len(items) > 1
+    overall_rc = 0
+    for i, (stage, params) in enumerate(items):
+        with _JOB_LOCK:
+            if _JOB["status"] != "running":      # user stopped before this stage
+                break
+            if seq:
+                _JOB["lines"].append(f"\n══ [{i + 1}/{len(items)}] {stage} ══")
+        rc = _stream(_spawn(stage, params))
+        with _JOB_LOCK:
+            stopped = _JOB["status"] == "stopped"
+            _JOB["lines"].append(f"── {stage} exited with code {rc} ──")
+        if stopped:
+            overall_rc = rc or 1
+            break
+        if rc != 0:
+            overall_rc = rc
+            if seq:
+                with _JOB_LOCK:
+                    _JOB["lines"].append(f"✗ {stage} failed (exit {rc}) — stopping the pipeline.")
+            break
+    with _JOB_LOCK:
+        _JOB["returncode"] = overall_rc
+        if _JOB["status"] == "running":
+            _JOB["status"] = "done" if overall_rc == 0 else "failed"
+        if seq:
+            _JOB["lines"].append("══ pipeline " + ("done ✓" if overall_rc == 0 else "stopped") + " ══")
+
+
+def start_job(items: list) -> tuple[bool, str]:
+    """Start a list of (stage, params) tuples as one job. Returns (started, msg)."""
+    with _JOB_LOCK:
+        if _JOB["status"] == "running":
+            return False, "A job is already running — wait for it to finish or stop it."
+        _JOB.update(stage=items[0][0], status="running", lines=[], returncode=None, proc=None)
+    threading.Thread(target=_worker, args=(items,), daemon=True).start()
     return True, "started"
 
 
@@ -879,12 +916,25 @@ def run_panel():
     )
 
 
+@app.route("/api/run/all", methods=["POST"])
+def api_run_all():
+    """Run scrape → backfill → score back-to-back as one server-side job, so it
+    keeps going after you close the tab. Body: {"scrape": {...}, "backfill":
+    {...}, "score": {...}} (any stage's params may be omitted)."""
+    body = request.get_json(silent=True) or {}
+    items = [(s, body.get(s) or {}) for s in PIPELINE_ORDER]
+    started, msg = start_job(items)
+    if not started:
+        return jsonify({"ok": False, "error": msg}), 409
+    return jsonify({"ok": True, "stage": "all"})
+
+
 @app.route("/api/run/<stage>", methods=["POST"])
 def api_run(stage: str):
     if stage not in _STAGES:
         return jsonify({"ok": False, "error": f"unknown stage {stage!r}"}), 400
     params = request.get_json(silent=True) or {}
-    started, msg = start_job(stage, params)
+    started, msg = start_job([(stage, params)])
     if not started:
         return jsonify({"ok": False, "error": msg}), 409
     return jsonify({"ok": True, "stage": stage})
