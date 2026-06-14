@@ -87,10 +87,10 @@
     {% endif %}
 
     <div class="s-actions">
-      <button class="act pass {{ 'on' if reaction == 'passed' }}" id="d-pass"
-              data-id="{{ l.listing_id }}">✕ <span>{{ 'Passed' if reaction == 'passed' else 'Pass' }}</span></button>
-      <button class="act heart {{ 'on' if reaction == 'liked' }}" id="d-heart"
-              data-id="{{ l.listing_id }}">♥ <span>{{ 'Saved' if reaction == 'liked' else 'Save' }}</span></button>
+      <button class="t-btn pass {{ 'on' if reaction == 'passed' }}" id="d-pass"
+              data-id="{{ l.listing_id }}" title="Pass">✕</button>
+      <button class="t-btn like {{ 'on' if reaction == 'liked' }}" id="d-heart"
+              data-id="{{ l.listing_id }}" title="Like">♥</button>
     </div>
     <a class="act primary wide" href="/?similar={{ l.listing_id }}">✨ More like this</a>
   </aside>
