@@ -38,6 +38,11 @@
   .cs-menu li.sel { color:var(--accent); }
   .cs-menu li.sel::after { content:"✓"; float:right; }
   .cs-menu li .nm { display:flex; gap:7px; align-items:baseline; }
+  /* Type-to-filter search box inside list dropdowns. */
+  .cs-menu .cs-search { width:100%; box-sizing:border-box; background:#0f1218; color:var(--txt);
+                        border:1px solid var(--line); border-radius:7px; padding:7px 9px;
+                        font-size:14px; margin-bottom:5px; }
+  .cs-menu .cs-search:focus { outline:none; border-color:var(--accent); }
   /* Multi-select options: a properly-aligned custom checkbox instead of the
      floating ✓ (which wrapped under the label). */
   .cs-menu li.opt { display:flex; align-items:center; gap:9px; }

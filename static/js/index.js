@@ -50,6 +50,45 @@ document.querySelectorAll('.cs').forEach(cs => {
 });
 document.addEventListener('click', () => document.querySelectorAll('.cs.open').forEach(o => o.classList.remove('open')));
 
+// ── Type-to-filter: a search box inside each list dropdown ──
+(function () {
+  document.querySelectorAll('.cs').forEach(cs => {
+    const menu = cs.querySelector('.cs-menu');
+    if (!menu) return;
+    const opts = [...menu.querySelectorAll('li[data-value]')];
+    if (!opts.length) return;                         // skip the price slider (no options)
+
+    const search = document.createElement('input');
+    search.type = 'text';
+    search.className = 'cs-search';
+    search.placeholder = 'Type to filter…';
+    const tools = menu.querySelector('.cs-tools');
+    if (tools) tools.after(search); else menu.prepend(search);
+
+    const filter = () => {
+      const q = search.value.trim().toLowerCase();
+      opts.forEach(li => { li.style.display = li.textContent.toLowerCase().includes(q) ? '' : 'none'; });
+    };
+    search.addEventListener('click', e => e.stopPropagation());
+    search.addEventListener('input', filter);
+    search.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {                        // Enter = act on the first match
+        e.preventDefault();
+        const first = opts.find(li => li.style.display !== 'none');
+        if (first) first.click();
+      } else if (e.key === 'Escape') {
+        cs.classList.remove('open');
+      }
+    });
+    // Focus the box and clear any prior filter each time the dropdown opens.
+    cs.querySelector('.cs-btn').addEventListener('click', () => {
+      setTimeout(() => {
+        if (cs.classList.contains('open')) { search.value = ''; filter(); search.focus(); }
+      }, 0);
+    });
+  });
+})();
+
 // ── Price dual-range slider ──
 (function () {
   const lo = document.getElementById('p-min');
