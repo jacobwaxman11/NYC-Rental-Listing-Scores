@@ -8,8 +8,7 @@
             zoom + scroll). Children can only further restrict, not re-enable. */
          touch-action:manipulation; }
   header { padding:20px 28px; border-bottom:1px solid var(--line);
-           display:flex; align-items:center; gap:16px; flex-wrap:wrap;
-           position:sticky; top:0; z-index:50; background:var(--bg); }
+           display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
   h1 { font-size:20px; margin:0; font-weight:650; }
   .sub { color:var(--muted); font-size:13px; }
   .tools { margin-left:auto; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
@@ -56,7 +55,8 @@
   .searchbar form { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   .searchbar input[type=text] { flex:1; min-width:260px; background:var(--card);
     color:var(--txt); border:1px solid var(--line); border-radius:10px;
-    padding:11px 14px; font-size:14px; }
+    /* 16px min so iOS Safari doesn't auto-zoom when the field is focused. */
+    padding:11px 14px; font-size:16px; }
   .searchbar input[type=text]:focus { outline:none; border-color:var(--accent); }
   .searchbar input[type=text]:disabled { opacity:.6; }
   .ask { background:linear-gradient(135deg,#60a5fa,#34d399); color:#06281f; border:none;
