@@ -342,7 +342,29 @@ function openTinder() {
   ti = 0; history = []; hideToast(); updateUndo();
   tinder.classList.remove('hidden'); renderDeck();
 }
-function closeTinder() { hideToast(); hideHint(); clearMiniMap(); tinder.classList.add('hidden'); }
+function closeTinder() { hideToast(); hideHint(); clearMiniMap(); closeFullMap(); tinder.classList.add('hidden'); }
+
+// ── Fullscreen map (the ⤢ expand button on a card's mini-map) ──
+let fullMap = null;
+function openFullMap(r) {
+  if (!window.L || r.lat == null || r.lng == null) return;
+  document.getElementById('t-map-full').classList.remove('hidden');
+  if (fullMap) { fullMap.remove(); fullMap = null; }
+  fullMap = L.map('t-map-full-canvas').setView([r.lat, r.lng], 16);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(fullMap);
+  L.marker([r.lat, r.lng]).addTo(fullMap).bindPopup(r.name || '').openPopup();
+  setTimeout(() => { if (fullMap) fullMap.invalidateSize(); }, 30);  // container was display:none
+}
+function closeFullMap() {
+  if (fullMap) { fullMap.remove(); fullMap = null; }
+  document.getElementById('t-map-full').classList.add('hidden');
+}
+// The expand button lives on a re-rendered card, so delegate from the stage.
+stage.addEventListener('click', e => {
+  if (e.target.closest('.t-map-expand')) { e.stopPropagation(); openFullMap(DECK[ti]); }
+});
+document.getElementById('t-map-full-close').addEventListener('click', closeFullMap);
 
 // "?" help popover
 const hintEl = document.getElementById('t-hint');
@@ -368,6 +390,7 @@ undoBtn.addEventListener('click', undoLast);
 document.getElementById('t-toast-undo').addEventListener('click', undoLast);
 document.addEventListener('keydown', e => {
   if (tinder.classList.contains('hidden')) return;
+  if (fullMap) { if (e.key === 'Escape') closeFullMap(); return; }   // map open: don't swipe/undo
   if (e.key === 'ArrowRight') flyTop(1);
   else if (e.key === 'ArrowLeft') flyTop(-1);
   else if (e.key === 'z' || e.key === 'Backspace') { e.preventDefault(); undoLast(); }
