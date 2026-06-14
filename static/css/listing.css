@@ -9,6 +9,10 @@
 .detail { max-width:1080px; margin:0 auto; padding:22px;
           display:grid; grid-template-columns:1.6fr 1fr; gap:22px; align-items:start; }
 .detail > .block, .detail > .map-block { grid-column:1 / -1; }
+/* Grid items default to min-width:auto, so a long unbreakable word (e.g. a URL
+   in the description) would force a track wider than the viewport and require
+   zooming out. Letting items shrink to 0 keeps the page at viewport width. */
+.detail > * { min-width:0; }
 
 /* Gallery */
 .gallery { display:flex; flex-direction:column; gap:10px; }
@@ -62,7 +66,8 @@
 /* Content blocks */
 .block { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px; }
 .block h2 { font-size:16px; margin:0 0 12px; }
-.desc p { margin:0; white-space:pre-line; color:var(--txt); line-height:1.65; }
+.desc p { margin:0; white-space:pre-line; color:var(--txt); line-height:1.65;
+          overflow-wrap:anywhere; word-break:break-word; }
 .chips { display:flex; flex-wrap:wrap; gap:8px; }
 .chip-a { font-size:13px; background:#1f2734; border:1px solid var(--line); color:var(--txt);
           border-radius:8px; padding:5px 11px; text-decoration:none; }

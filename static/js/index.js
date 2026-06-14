@@ -190,7 +190,6 @@ function cardMarkup(r) {
       '<span class="t-nav-hint left">‹</span><span class="t-nav-hint right">›</span>' +
     '</div>' +
     '<span class="stamp like">LIKE</span><span class="stamp pass">NOPE</span>' +
-    ((r.lat != null && r.lng != null) ? '<div class="t-map"></div>' : '') +
     '<div class="t-info">' + badge +
       '<div class="t-addr">' + r.name + '</div>' +
       '<div class="t-meta">' + r.neighborhood + ' · ' + beds + ' bd / ' + baths + ' ba' + sqft + '</div>' + tags +
@@ -198,31 +197,13 @@ function cardMarkup(r) {
     '</div>';
 }
 
-// A single Leaflet mini-map, mounted on the top card only and torn down on each
-// re-render. Display-only (all interaction disabled + pointer-events:none in
-// CSS) so dragging across it still swipes the card.
-let tMap = null;
-function clearMiniMap() { if (tMap) { tMap.remove(); tMap = null; } }
-function mountMiniMap(cardEl, r) {
-  const el = cardEl.querySelector('.t-map');
-  if (!el || !window.L || r.lat == null || r.lng == null) return;
-  tMap = L.map(el, {
-    zoomControl: false, attributionControl: false, dragging: false,
-    scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
-    keyboard: false, touchZoom: false, tap: false,
-  }).setView([r.lat, r.lng], 14);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(tMap);
-  L.marker([r.lat, r.lng]).addTo(tMap);
-}
-
 function renderDeck() {
-  clearMiniMap();
   stage.innerHTML = '';
   counter.textContent = ti < DECK.length ? (ti + 1) + ' / ' + DECK.length : DECK.length + ' / ' + DECK.length;
   if (ti >= DECK.length) { doneEl.classList.remove('hidden'); return; }
   doneEl.classList.add('hidden');
 
-  // Card behind (depth), if present. No map on the behind card.
+  // Card behind (depth), if present.
   if (ti + 1 < DECK.length) {
     const behind = document.createElement('div');
     behind.className = 't-card behind';
@@ -235,7 +216,6 @@ function renderDeck() {
   top.innerHTML = cardMarkup(DECK[ti]);
   stage.appendChild(top);
   attachDrag(top);
-  mountMiniMap(top, DECK[ti]);
 }
 
 function decide(reaction) {
@@ -339,7 +319,7 @@ function openTinder() {
   ti = 0; history = []; hideToast(); updateUndo();
   tinder.classList.remove('hidden'); renderDeck();
 }
-function closeTinder() { hideToast(); clearMiniMap(); tinder.classList.add('hidden'); }
+function closeTinder() { hideToast(); tinder.classList.add('hidden'); }
 
 const openBtn = document.getElementById('tinder-open');
 if (openBtn) openBtn.addEventListener('click', openTinder);
