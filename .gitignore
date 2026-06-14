@@ -5,8 +5,12 @@ venv/
 # Secrets / environment
 .env
 
-# Database (per ReadMe — rebuildable, not tracked)
-rentals.db
+# Databases (per ReadMe — rebuildable, not tracked)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 
 # Downloaded listing photos
 images/
