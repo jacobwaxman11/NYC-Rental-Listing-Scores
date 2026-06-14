@@ -364,7 +364,7 @@ Output schema (use null for anything not implied):
     "only_underpriced": boolean,
     "exclude_reviewed": boolean
   },
-  "rank_by": [ {"field": "sqft"|"rent"|"pct_diff"|"apt_quality"|"beds",
+  "rank_by": [ {"field": "sqft"|"rent"|"pct_diff"|"apt_quality"|"beds"|"distance",
                 "direction": "asc"|"desc", "weight": number} ],
   "semantic_query": string|null,
   "limit": number
@@ -389,6 +389,9 @@ Rules:
   "better deal"/"underpriced" -> only_underpriced true and/or rank pct_diff asc.
 - "like this" with a reference -> prefer the same neighborhood and similar
   beds/baths, then apply the modifier.
+- "nearby"/"close to this"/"within walking distance"/"in the area" (only with a
+  reference) -> rank_by distance asc. "distance" ranks by proximity to the
+  reference listing; it is ignored when there is no reference.
 - "based on what I liked"/"similar to my likes" -> use the liked profile to set
   sensible ranges/areas and set exclude_reviewed=true.
 - "haven't reviewed"/"new"/"not seen yet" -> exclude_reviewed=true.
@@ -444,7 +447,7 @@ def _build_context(sugg: list[dict], ref_id: str) -> dict:
     return ctx
 
 
-def _apply_plan(plan: dict, sugg: list[dict], query_vec=None) -> list[dict]:
+def _apply_plan(plan: dict, sugg: list[dict], query_vec=None, ref_point=None) -> list[dict]:
     """Execute a query plan locally over the listings — no model calls here.
 
     ``query_vec`` (optional) is an embedding of the plan's semantic_query; when
@@ -497,16 +500,27 @@ def _apply_plan(plan: dict, sugg: list[dict], query_vec=None) -> list[dict]:
 
     rows = [r for r in rows if keep(r)]
 
-    rank = [e for e in (plan.get("rank_by") or []) if e.get("field") in _RANK_FIELDS]
+    raw_rank = plan.get("rank_by") or []
+    rank = [e for e in raw_rank if e.get("field") in _RANK_FIELDS]
+    # "distance" ranks by proximity to the reference (only valid with a ref_point).
+    dist_rank = [e for e in raw_rank if e.get("field") == "distance"] if ref_point else []
     emb = _STATE["embeddings"]
     use_sem = query_vec is not None and bool(emb)
 
-    if (rank or use_sem) and rows:
+    if (rank or dist_rank or use_sem) and rows:
         ranges = {}
         for e in rank:
             fld = e["field"]
             vals = [r[fld] for r in rows if r.get(fld) is not None]
             ranges[fld] = (min(vals), max(vals)) if vals else (0.0, 0.0)
+
+        dists, dlo, dhi = {}, 0.0, 0.0
+        if dist_rank:
+            for r in rows:
+                dists[r["listing_id"]] = geo.haversine_mi(
+                    ref_point[0], ref_point[1], r.get("lat"), r.get("lng"))
+            dvals = [d for d in dists.values() if d is not None]
+            dlo, dhi = (min(dvals), max(dvals)) if dvals else (0.0, 0.0)
 
         sims, slo, shi = {}, 0.0, 0.0
         if use_sem:
@@ -525,6 +539,13 @@ def _apply_plan(plan: dict, sugg: list[dict], query_vec=None) -> list[dict]:
                 v = r.get(fld)
                 nrm = 0.5 if (v is None or hi == lo) else (v - lo) / (hi - lo)
                 if e.get("direction") == "asc":
+                    nrm = 1.0 - nrm
+                s += w * nrm
+            for e in dist_rank:
+                w = num(e.get("weight")) or 1.0
+                d = dists.get(r["listing_id"])
+                nrm = 0.5 if (d is None or dhi == dlo) else (d - dlo) / (dhi - dlo)
+                if e.get("direction") != "desc":   # default: nearer is better
                     nrm = 1.0 - nrm
                 s += w * nrm
             if use_sem:
@@ -566,7 +587,13 @@ def ai_search(query: str, ref_id: str):
         except Exception:
             query_vec = None
 
-    return plan, _apply_plan(plan, sugg, query_vec=query_vec)
+    ref_point = None
+    if ref_id:
+        ref = next((r for r in sugg if r["listing_id"] == ref_id), None)
+        if ref and ref.get("lat") is not None and ref.get("lng") is not None:
+            ref_point = (ref["lat"], ref["lng"])
+
+    return plan, _apply_plan(plan, sugg, query_vec=query_vec, ref_point=ref_point)
 
 
 def match_likes(limit: int = 40):

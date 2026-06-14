@@ -69,3 +69,12 @@ def test_similar_without_coords_falls_back_to_style_order():
 def test_similar_unknown_reference():
     rows, banner, distances = web.similar_to("zzz")
     assert rows == [] and distances == {} and "isn't in the current set" in banner
+
+
+def test_apply_plan_distance_rank():
+    sugg = web._STATE["suggestions"]   # a/b/c/d carry coords (b nearest a, then d, then c)
+    plan = {"filters": {}, "rank_by": [{"field": "distance", "direction": "asc", "weight": 1}]}
+    out = web._apply_plan(plan, sugg, ref_point=(40.7400, -73.9900))
+    assert [r["listing_id"] for r in out] == ["a", "b", "d", "c"]   # a is the ref point (0 mi)
+    # Without a reference point, a distance rank is silently ignored (no crash).
+    assert len(web._apply_plan(plan, sugg)) == len(sugg)
