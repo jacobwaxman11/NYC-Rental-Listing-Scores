@@ -922,28 +922,47 @@ def api_run_stop():
 
 # ── Area options for the Pipeline UI ──────────────────────────────────────────
 #
-# StreetEasy area IDs -> neighborhood names for the area picker. Chelsea,
-# Gramercy Park, Flatiron, Hudson Yards, and Upper East Side are confirmed by
-# scrape_listings.py's docstring; the rest are the working set used in this
-# repo. The numeric ID is shown alongside each name in the UI so it stays
-# verifiable.
+# StreetEasy neighborhood slugs -> display names for the area picker. Slugs are
+# the reliable, human-readable form (the ``<slug>`` in a
+# streeteasy.com/for-rent/<slug> URL) and every one below was validated to
+# return listings. The slug is shown next to each name in the UI so it stays
+# verifiable. To add more, grab the slug from StreetEasy's URL.
 AREA_OPTIONS = [
-    ("104", "Financial District"),
-    ("105", "Tribeca"),
-    ("106", "Stuyvesant Town/PCV"),
-    ("113", "Chelsea"),
-    ("115", "Gramercy Park"),
-    ("116", "Greenwich Village"),
-    ("117", "East Village"),
-    ("130", "Turtle Bay"),
-    ("131", "Kips Bay"),
-    ("133", "Sutton Place"),
-    ("140", "Upper East Side"),
-    ("146", "Hudson Yards"),
-    ("152", "West Village"),
-    ("157", "Murray Hill"),
-    ("158", "Flatiron"),
-    ("162", "Nolita"),
+    # Lower Manhattan
+    ("financial-district", "Financial District"),
+    ("battery-park-city", "Battery Park City"),
+    ("fulton-seaport", "Fulton/Seaport"),
+    ("civic-center", "Civic Center"),
+    ("tribeca", "Tribeca"),
+    ("soho", "SoHo"),
+    ("nolita", "Nolita"),
+    ("little-italy", "Little Italy"),
+    ("chinatown", "Chinatown"),
+    ("les", "Lower East Side"),
+    # Greenwich Village / Midtown South
+    ("west-village", "West Village"),
+    ("greenwich-village", "Greenwich Village"),
+    ("east-village", "East Village"),
+    ("noho", "Noho"),
+    ("chelsea", "Chelsea"),
+    ("west-chelsea", "West Chelsea"),
+    ("flatiron", "Flatiron"),
+    ("nomad", "NoMad"),
+    ("gramercy-park", "Gramercy Park"),
+    ("murray-hill", "Murray Hill"),
+    ("kips-bay", "Kips Bay"),
+    ("hudson-yards", "Hudson Yards"),
+    ("hells-kitchen", "Hell's Kitchen"),
+    # Brooklyn
+    ("williamsburg", "Williamsburg"),
+    ("greenpoint", "Greenpoint"),
+    ("dumbo", "DUMBO"),
+    ("brooklyn-heights", "Brooklyn Heights"),
+    ("cobble-hill", "Cobble Hill"),
+    ("carroll-gardens", "Carroll Gardens"),
+    ("boerum-hill", "Boerum Hill"),
+    ("park-slope", "Park Slope"),
+    ("fort-greene", "Fort Greene"),
 ]
 
 
