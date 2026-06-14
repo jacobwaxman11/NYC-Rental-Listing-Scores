@@ -190,7 +190,7 @@ def engineer_features(
     df["sqft"] = df["sqft"].fillna(df["sqft"].median())
 
     # ── Bool/int normalization ───────────────────────────────────────────────
-    for col in ("has_floor_plan"):
+    for col in ("has_floor_plan",):   # note the comma: a 1-tuple, not a string
         if col in df.columns:
             df[col] = df[col].fillna(0).astype(int)
 

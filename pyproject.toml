@@ -38,8 +38,8 @@ streeteasier-web      = "web:main"
 [tool.setuptools]
 py-modules = [
     "config", "db", "features", "geo", "llm", "embeddings", "prompts", "tags",
-    "scrape_listings", "backfill_details", "score_listings", "embed_listings",
-    "web",
+    "scorers", "scrape_listings", "backfill_details", "score_listings",
+    "embed_listings", "web",
 ]
 
 [tool.pytest.ini_options]

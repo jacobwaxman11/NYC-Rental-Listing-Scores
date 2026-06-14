@@ -1,30 +1,10 @@
-"""Tests for the provider-agnostic scoring logic (score_listings.py).
+"""Tests for the scoring pipeline's aggregation (score_listings.aggregate_scores).
 
-Covers the pure helpers (no API calls): JSON parsing, tag cleaning, result
-coercion, and the per-listing score aggregation.
+The provider scorers + their JSON/tag helpers moved to scorers.py — see
+test_scorers.py. This file covers the per-listing score rollup.
 """
 
 import score_listings as sl
-
-
-def test_clean_tags_filters_and_dedupes():
-    out = sl._clean_tags(["duplex", "made_up_tag", "bright", "bright"])
-    assert out == ["duplex", "bright"]                 # unknown dropped, deduped, order kept
-    assert sl._clean_tags(None) == []
-    assert sl._clean_tags("not-a-list") == []
-    assert sl.VALID_TAGS and "hardwood_floors" in sl.VALID_TAGS
-
-
-def test_loads_lenient_handles_fences_and_prose():
-    assert sl._loads_lenient('[{"a": 1}]') == [{"a": 1}]
-    assert sl._loads_lenient('```json\n[{"a": 1}]\n```') == [{"a": 1}]
-    assert sl._loads_lenient('Results: [{"a": 1}, {"b": 2}] done') == [{"a": 1}, {"b": 2}]
-
-
-def test_coerce_to_list_pads_and_wraps():
-    assert sl._coerce_to_list([{"x": 1}], 3) == [{"x": 1}, None, None]
-    assert sl._coerce_to_list({"x": 1}, 1) == [{"x": 1}]          # lone object → list
-    assert sl._coerce_to_list([1, 2, 3], 2) == [1, 2]            # truncate
 
 
 def test_aggregate_scores_rollup():
@@ -64,8 +44,3 @@ def test_aggregate_scores_empty():
     assert s["photos_total"] == 0
     assert s["apartment"] == {}
     assert s["common_space"] == {}
-
-
-def test_provider_defaults():
-    assert sl.PROVIDER_DEFAULT_MODELS["gemini"].startswith("gemini")
-    assert sl.PROVIDER_DEFAULT_MODELS["anthropic"].startswith("claude")
