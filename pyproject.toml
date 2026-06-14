@@ -37,9 +37,9 @@ streeteasier-web      = "web:main"
 # The project is a flat set of modules (not yet a package); list them explicitly.
 [tool.setuptools]
 py-modules = [
-    "config", "db", "features", "geo", "llm", "embeddings", "poll_state",
-    "prompts", "tags", "scorers", "scrape_listings", "backfill_details",
-    "score_listings", "embed_listings", "web",
+    "config", "db", "features", "geo", "grouping", "llm", "embeddings",
+    "poll_state", "prompts", "tags", "scorers", "scrape_listings",
+    "backfill_details", "score_listings", "embed_listings", "web",
 ]
 
 [tool.pytest.ini_options]
