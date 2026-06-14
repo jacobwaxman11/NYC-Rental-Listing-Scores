@@ -50,6 +50,20 @@ document.querySelectorAll('.cs').forEach(cs => {
 });
 document.addEventListener('click', () => document.querySelectorAll('.cs.open').forEach(o => o.classList.remove('open')));
 
+// ── Building grouping: toggle grouped/flat, and expand a building's units ──
+const grpToggle = document.getElementById('grp-toggle');
+if (grpToggle) grpToggle.addEventListener('click', () => go('group', grpToggle.dataset.group));
+
+document.querySelectorAll('.bldg-toggle').forEach(btn => {
+  btn.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation();
+    const panel = document.getElementById(btn.dataset.target);
+    if (!panel) return;
+    panel.hidden = !panel.hidden;
+    btn.classList.toggle('open', !panel.hidden);
+  });
+});
+
 // ── Type-to-filter: a search box inside each list dropdown ──
 (function () {
   document.querySelectorAll('.cs').forEach(cs => {
@@ -166,6 +180,21 @@ document.querySelectorAll('.undo').forEach(b => {
     e.preventDefault(); e.stopPropagation();
     await react(b.dataset.id, 'none');
     b.closest('.card').remove();
+  });
+});
+// Pass (✕) a listing straight from the grid — record it and slide the card out
+// (passed listings are hidden from every non-"passed" view, so it shouldn't
+// linger here).
+document.querySelectorAll('.card-pass').forEach(b => {
+  b.addEventListener('click', async e => {
+    e.preventDefault(); e.stopPropagation();
+    react(b.dataset.id, 'passed');                 // fire-and-forget persist
+    const card = b.closest('.card');
+    if (!card) return;
+    card.style.transition = 'opacity .2s, transform .2s';
+    card.style.opacity = '0';
+    card.style.transform = 'scale(.97)';
+    setTimeout(() => card.remove(), 190);
   });
 });
 

@@ -38,8 +38,8 @@
     <h1>StreetEasier</h1>
   </a>
   <span class="sub">
-    {{ meta.underpriced }} below-model of {{ meta.total }} scored ·
-    {{ liked_total }} ❤ · {{ passed_total }} ✕ ·
+    {% if group_on %}{{ n_units }} unit{{ '' if n_units == 1 else 's' }} across {{ n_buildings }} building{{ '' if n_buildings == 1 else 's' }} ·
+    {% endif %}{{ liked_total }} ❤ · {{ passed_total }} ✕ ·
     {{ "out-of-fold (grouped by building)" if meta.cv else "in-sample fit" }}
   </span>
   {% set sort_labels = {'deal':'Biggest discount','rent_asc':'Rent ↑','rent_desc':'Rent ↓','quality':'Photo quality'} %}
@@ -99,6 +99,8 @@
     <a class="tinder-open match {{ 'disabled' if not (emb_ready and liked_total) }}"
        href="{{ '/?match=likes' if (emb_ready and liked_total) else '#' }}"
        title="{{ 'Rank unreviewed listings by similarity to what you liked' if emb_ready else 'Run embed_listings.py first to enable' }}">🧭 Match my likes</a>
+    <button class="grp-toggle {{ 'on' if group_on }}" id="grp-toggle" data-group="{{ 0 if group_on else 1 }}"
+            title="{{ 'Showing one card per building' if group_on else 'Showing every unit' }}">🏢 {{ 'Grouped' if group_on else 'Flat' }}</button>
     <a class="refresh" href="/run">⚙ Pipeline</a>
     <a class="refresh" href="/?refresh=1">↻ recompute</a>
   </div>
@@ -145,7 +147,8 @@
   {% for r in rows %}
     <div class="card" data-href="/listing/{{ r.listing_id }}">
       <div class="photo" data-id="{{ r.listing_id }}" {% if r.img_pos is not none %}style="background-image:url('/img/{{ r.listing_id }}/{{ r.img_pos }}')"{% endif %}>
-        <button class="heart {{ 'on' if r.reaction == 'liked' }}" data-id="{{ r.listing_id }}" title="Save">♥</button>
+        <button class="heart {{ 'on' if r.reaction == 'liked' }}" data-id="{{ r.listing_id }}" title="Like">♥</button>
+        {% if show != 'passed' %}<button class="card-pass" data-id="{{ r.listing_id }}" title="Pass">✕</button>{% endif %}
         {% if show == 'passed' %}<button class="undo" data-id="{{ r.listing_id }}" title="Restore">↩</button>{% endif %}
       </div>
       <div class="body">
@@ -177,6 +180,21 @@
             {% if r.url %}<a class="view" href="{{ r.url }}" target="_blank" rel="noopener">view ↗</a>{% endif %}
           </span>
         </div>
+        {% set others = group_others.get(r.listing_id) %}
+        {% if others %}
+          <button class="bldg-toggle" type="button" data-target="bldg-{{ r.listing_id }}">
+            🏢 {{ others|length + 1 }} units in this building <span class="chev">▾</span>
+          </button>
+          <div class="bldg-units" id="bldg-{{ r.listing_id }}" hidden>
+            {% for o in others %}
+              <a class="bldg-unit" href="/listing/{{ o.listing_id }}">
+                <span class="u-rent">${{ '{:,}'.format(o.rent) }}</span>
+                <span class="u-meta">{{ (o.beds|int) if o.beds is not none else '?' }} bd / {{ o.baths if o.baths is not none else '?' }} ba{% if o.sqft %} · {{ '{:,}'.format(o.sqft) }} ft²{% endif %}</span>
+                {% if o.pct_diff < 0 %}<span class="u-deal good">{{ '%.0f'|format(-o.pct_diff*100) }}% below</span>{% else %}<span class="u-deal bad">{{ '%.0f'|format(o.pct_diff*100) }}% above</span>{% endif %}
+              </a>
+            {% endfor %}
+          </div>
+        {% endif %}
       </div>
     </div>
   {% endfor %}

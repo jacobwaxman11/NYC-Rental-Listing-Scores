@@ -46,6 +46,23 @@ def test_area_filter_narrows_results():
     assert "Ref Apt" in html and "Near Apt" in html
 
 
+def test_building_grouping():
+    web._STATE["suggestions"] = [
+        _row("bldgX_1", "Unit 1", "Chelsea", 40.74, -73.99),
+        _row("bldgX_2", "Unit 2", "Chelsea", 40.74, -73.99),
+        _row("bldgY_1", "Solo", "LES", 40.72, -74.00),
+    ]
+    web._STATE["meta"] = {"total": 3, "underpriced": 3, "cv": True,
+                          "neighborhoods": ["Chelsea", "LES"]}
+    # Grouped (default): the two bldgX units collapse to one card with a badge.
+    html = web.app.test_client().get("/?show=all").get_data(as_text=True)
+    assert "units in this building" in html
+    assert "across 2 buildings" in html               # header indicator
+    # Flat: every unit is its own card, no grouping badge.
+    flat = web.app.test_client().get("/?show=all&group=0").get_data(as_text=True)
+    assert "units in this building" not in flat
+
+
 def test_similar_renders_distance_chip():
     html = web.app.test_client().get("/?similar=a").get_data(as_text=True)
     assert "similar style" in html          # banner

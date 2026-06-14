@@ -47,6 +47,7 @@ from sklearn.preprocessing import StandardScaler
 import db as dbm
 import embeddings as emb_mod
 import geo
+import grouping
 import llm as llm_mod
 from features import collapse_amenity_tiers, collapse_image_scores, prepare_features
 
@@ -337,6 +338,7 @@ def build_suggestions(db_path: str) -> dict:
 
             rows.append({
                 "listing_id": listing_id,
+                "building_slug": listing.get("building_slug") or "",
                 "name": listing.get("name") or listing.get("street") or listing_id,
                 "neighborhood": listing.get("neighborhood") or "—",
                 "lat": listing.get("lat"),
@@ -822,6 +824,20 @@ def index():
         elif sort == "quality":
             rows.sort(key=lambda r: -(r["apt_quality"] or 0))
 
+    # Collapse same-building units into one lead card so a big building doesn't
+    # flood the grid with near-identical photos. The lead is the most relevant
+    # unit (rows are already sorted); the rest hang off it in an expandable
+    # panel. ?group=0 flattens back to one card per unit.
+    group_on = request.args.get("group", "1") != "0"
+    groups = grouping.group_by_building(rows)
+    n_units = len(rows)
+    n_buildings = len(groups)
+    group_others: dict = {}
+    if group_on:
+        rows = [g["lead"] for g in groups]
+        group_others = {g["lead"]["listing_id"]: g["others"]
+                        for g in groups if g["count"] > 1}
+
     liked_total = sum(1 for r in _STATE["suggestions"] if r["reaction"] == "liked")
     passed_total = sum(1 for r in _STATE["suggestions"] if r["reaction"] == "passed")
 
@@ -834,6 +850,8 @@ def index():
         ai_enabled=ai["enabled"], ai_provider=ai["provider"],
         ai_model=ai["model"], ai_banner=ai_banner, distances=distances,
         emb_ready=bool(_STATE["embeddings"]),
+        group_on=group_on, group_others=group_others,
+        n_units=n_units, n_buildings=n_buildings,
     )
     # Don't let the browser cache the grid — otherwise a reload serves the old
     # HTML and the Shuffle sort looks "stuck" on the same order.
