@@ -16,6 +16,34 @@ document.querySelectorAll('.cs').forEach(cs => {
     document.querySelectorAll('.cs.open').forEach(o => { if (o !== cs) o.classList.remove('open'); });
     cs.classList.toggle('open');
   });
+  // Multi-select area filter: toggle items (menu stays open), apply on demand.
+  if (cs.classList.contains('multi')) {
+    const label = cs.querySelector('.cs-btn span');
+    const items = () => [...cs.querySelectorAll('.cs-menu li[data-value]')];
+    const relabel = () => {
+      const n = items().filter(li => li.classList.contains('sel')).length;
+      label.textContent = (n === 0 || n === items().length) ? 'All areas' : n + ' area' + (n === 1 ? '' : 's');
+    };
+    const apply = () => {
+      const sel = items().filter(li => li.classList.contains('sel'));
+      const val = (sel.length === 0 || sel.length === items().length)
+        ? '' : sel.map(li => li.dataset.value).join(',');
+      go('nh', val);
+    };
+    items().forEach(li => li.addEventListener('click', e => {
+      e.stopPropagation(); li.classList.toggle('sel'); relabel();
+    }));
+    const tools = cs.querySelector('.cs-tools');
+    if (tools) {
+      tools.addEventListener('click', e => e.stopPropagation());
+      tools.querySelector('[data-all]')?.addEventListener('click', () => { items().forEach(li => li.classList.add('sel')); relabel(); });
+      tools.querySelector('[data-none]')?.addEventListener('click', () => { items().forEach(li => li.classList.remove('sel')); relabel(); });
+      tools.querySelector('[data-apply]')?.addEventListener('click', apply);
+    }
+    relabel();
+    return;   // skip single-select navigation wiring
+  }
+
   cs.querySelectorAll('.cs-menu li').forEach(li => {
     li.addEventListener('click', () => go(cs.dataset.param, li.dataset.value));
   });

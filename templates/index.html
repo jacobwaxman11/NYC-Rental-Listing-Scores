@@ -32,12 +32,16 @@
     {{ csel('sort', sort, {'deal':'Biggest discount','rent_asc':'Rent: low → high','rent_desc':'Rent: high → low','quality':'Photo quality'}) }}
     {{ csel('beds', min_beds, {'0':'Any beds','1':'1+ bed','2':'2+ bed','3':'3+ bed'}) }}
 
-    <div class="cs" data-param="nh">
-      <button type="button" class="cs-btn"><span>{{ nh if nh else 'All areas' }}</span><i>▾</i></button>
+    <div class="cs multi" data-name="nh">
+      <button type="button" class="cs-btn"><span>{{ (nh_list|length ~ ' area' ~ ('' if nh_list|length == 1 else 's')) if nh_list else 'All areas' }}</span><i>▾</i></button>
       <ul class="cs-menu">
-        <li data-value="" class="{{ 'sel' if not nh }}">All areas</li>
+        <li class="cs-tools">
+          <button type="button" data-all>All</button>
+          <button type="button" data-none>Clear</button>
+          <button type="button" data-apply>Apply</button>
+        </li>
         {% for n in meta.neighborhoods %}
-          <li data-value="{{ n }}" class="{{ 'sel' if nh == n }}">{{ n }}</li>
+          <li data-value="{{ n }}" class="{{ 'sel' if n in nh_list }}"><span class="nm">{{ n }}</span></li>
         {% endfor %}
       </ul>
     </div>
@@ -105,7 +109,7 @@
         <div class="meta">
           {{ r.neighborhood }} ·
           {{ (r.beds|int) if r.beds is not none else '?' }} bd /
-          {{ r.baths if r.baths is not none else '?' }} ba{% if r.sqft %} · {{ '{:,}'.format(r.sqft) }} ft²{% endif %}
+          {{ r.baths if r.baths is not none else '?' }} ba{% if r.sqft %} · {{ '{:,}'.format(r.sqft) }} ft²{% endif %}{% if distances.get(r.listing_id) is not none %} · <span class="dist">{{ '%.1f'|format(distances[r.listing_id]) }} mi away</span>{% endif %}
         </div>
         {% if r.tags %}
           <div class="tags">

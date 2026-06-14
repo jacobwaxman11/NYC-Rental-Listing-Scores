@@ -45,6 +45,7 @@ from sklearn.preprocessing import StandardScaler
 
 import db as dbm
 import embeddings as emb_mod
+import geo
 import llm as llm_mod
 from features import collapse_amenity_tiers, collapse_image_scores, prepare_features
 
@@ -615,7 +616,7 @@ def similar_to(listing_id: str, limit: int = 40):
     sugg = _STATE["suggestions"]
     ref = next((r for r in sugg if r["listing_id"] == listing_id), None)
     if ref is None:
-        return [], "⚠ That listing isn't in the current set"
+        return [], "⚠ That listing isn't in the current set", {}
 
     emb = _STATE["embeddings"]
     cands = [r for r in sugg
@@ -628,7 +629,22 @@ def similar_to(listing_id: str, limit: int = 40):
     else:
         cands.sort(key=lambda r: _similarity_heuristic(ref, r), reverse=True)
 
-    return cands[:limit], f"✨ More like {ref['name']}"
+    pool = cands[:limit]   # the "like this" set, chosen by feature/style similarity
+
+    # Liking an apartment usually means caring about its area too — so we keep the
+    # selection style-driven but ORDER it by vicinity to the reference: similar in
+    # feel, nearest first. Listings without coordinates sink to the bottom.
+    rlat, rlng = ref.get("lat"), ref.get("lng")
+    distances = {}
+    if rlat is not None and rlng is not None:
+        for r in pool:
+            distances[r["listing_id"]] = geo.haversine_mi(rlat, rlng, r.get("lat"), r.get("lng"))
+        pool.sort(key=lambda r: (distances[r["listing_id"]] is None,
+                                 distances[r["listing_id"]] or 0.0))
+        banner = f"✨ Like {ref['name']} — similar style, nearest first"
+    else:
+        banner = f"✨ Like {ref['name']} — similar style"
+    return pool, banner, distances
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -652,6 +668,7 @@ def index():
     show = request.args.get("show", "under")           # under | all | liked | passed
     sort = request.args.get("sort", "deal")            # deal | rent_asc | rent_desc | quality
     nh = request.args.get("nh", "")
+    nh_set = {a for a in nh.split(",") if a}   # multi-area filter (comma-separated)
     try:
         min_beds = int(float(request.args.get("beds", "") or 0))
     except ValueError:
@@ -670,6 +687,7 @@ def index():
 
     ai_banner = None
     searching = False
+    distances = {}   # listing_id -> miles from reference, for "more like this"
 
     if q and ai["enabled"]:
         # AI search supersedes the dropdown filters; the plan controls the set.
@@ -681,9 +699,9 @@ def index():
             rows = []
             ai_banner = f"⚠ AI search failed: {e}"
     elif similar:
-        # "More like this" — local similarity to one reference listing.
+        # "More like this" — style-similar to one reference, ordered by vicinity.
         searching = True
-        rows, ai_banner = similar_to(similar)
+        rows, ai_banner, distances = similar_to(similar)
     elif match == "likes":
         # Taste matching — pure local vector math, no model call.
         searching = True
@@ -699,8 +717,8 @@ def index():
             rows = [r for r in rows if r["pct_diff"] < 0 and r["reaction"] != "passed"]
         else:  # all
             rows = [r for r in rows if r["reaction"] != "passed"]
-        if nh:
-            rows = [r for r in rows if r["neighborhood"] == nh]
+        if nh_set:
+            rows = [r for r in rows if r["neighborhood"] in nh_set]
         if min_beds:
             rows = [r for r in rows if (r["beds"] or 0) >= min_beds]
         if tag:
@@ -721,10 +739,10 @@ def index():
     return render_template(
         "index.html", rows=rows, meta=meta,
         liked_total=liked_total, passed_total=passed_total,
-        show=show, sort=sort, nh=nh, min_beds=str(min_beds),
+        show=show, sort=sort, nh=nh, nh_list=sorted(nh_set), min_beds=str(min_beds),
         q=q, ref=ref, ref_name=ref_name, searching=searching, active_tag=tag,
         ai_enabled=ai["enabled"], ai_provider=ai["provider"],
-        ai_model=ai["model"], ai_banner=ai_banner,
+        ai_model=ai["model"], ai_banner=ai_banner, distances=distances,
         emb_ready=bool(_STATE["embeddings"]),
     )
 
