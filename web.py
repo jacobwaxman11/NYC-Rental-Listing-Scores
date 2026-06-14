@@ -64,6 +64,10 @@ _STATE: dict = {
 }
 _SEARCH_CACHE: dict = {}
 
+# Price-slider bounds (dollars). Sitting at an end means "no bound that way";
+# PRICE_MAX is rendered as "10k+".
+PRICE_MIN, PRICE_MAX, PRICE_STEP = 2000, 10000, 250
+
 
 def _load_embeddings(db_path: str) -> dict:
     """Load stored listing vectors into memory as float32 arrays for fast cosine
@@ -675,6 +679,18 @@ def index():
     except ValueError:
         min_beds = 0
 
+    # Price range filter. The slider runs PRICE_MIN..PRICE_MAX; sitting at an end
+    # means "no bound that way" (PRICE_MAX is shown as "10k+").
+    def _price_arg(name: str, default: int) -> int:
+        try:
+            return max(PRICE_MIN, min(PRICE_MAX, int(float(request.args.get(name) or default))))
+        except (TypeError, ValueError):
+            return default
+    pmin = _price_arg("pmin", PRICE_MIN)
+    pmax = _price_arg("pmax", PRICE_MAX)
+    if pmin > pmax:
+        pmin, pmax = pmax, pmin
+
     q = request.args.get("q", "").strip()
     ref = request.args.get("ref", "").strip()
     tag = request.args.get("tag", "").strip()
@@ -722,6 +738,10 @@ def index():
             rows = [r for r in rows if r["neighborhood"] in nh_set]
         if min_beds:
             rows = [r for r in rows if (r["beds"] or 0) >= min_beds]
+        if pmin > PRICE_MIN:
+            rows = [r for r in rows if (r["rent"] or 0) >= pmin]
+        if pmax < PRICE_MAX:
+            rows = [r for r in rows if (r["rent"] or 0) <= pmax]
         if tag:
             rows = [r for r in rows if tag in (r.get("tags") or [])]
 
@@ -745,6 +765,7 @@ def index():
         "index.html", rows=rows, meta=meta,
         liked_total=liked_total, passed_total=passed_total,
         show=show, sort=sort, nh=nh, nh_list=sorted(nh_set), min_beds=str(min_beds),
+        pmin=pmin, pmax=pmax, price_min=PRICE_MIN, price_max=PRICE_MAX, price_step=PRICE_STEP,
         q=q, ref=ref, ref_name=ref_name, searching=searching, active_tag=tag,
         ai_enabled=ai["enabled"], ai_provider=ai["provider"],
         ai_model=ai["model"], ai_banner=ai_banner, distances=distances,

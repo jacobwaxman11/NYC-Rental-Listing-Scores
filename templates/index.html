@@ -42,7 +42,12 @@
     {{ liked_total }} ❤ · {{ passed_total }} ✕ ·
     {{ "out-of-fold (grouped by building)" if meta.cv else "in-sample fit" }}
   </span>
+  {% set sort_labels = {'deal':'Biggest discount','rent_asc':'Rent ↑','rent_desc':'Rent ↓','quality':'Photo quality'} %}
+  {% set show_labels = {'all':'All listings','liked':'❤ Liked','passed':'✕ Passed'} %}
+  {% set price_active = pmin != price_min or pmax != price_max %}
   <div class="tools">
+    <button class="filters-toggle" id="filters-toggle" title="Show / hide filters">⚙ Filters</button>
+    <div class="filters" id="filters">
     {{ csel('show', show, {'under':'Underpriced only','all':'All listings','liked':'❤ Liked','passed':'✕ Passed'}) }}
     {{ csel('sort', sort, {'shuffle':'Shuffle','deal':'Biggest discount','rent_asc':'Rent: low → high','rent_desc':'Rent: high → low','quality':'Photo quality'}) }}
     {{ csel('beds', min_beds, {'0':'Any beds','1':'1+ bed','2':'2+ bed','3':'3+ bed'}) }}
@@ -60,6 +65,35 @@
         {% endfor %}
       </ul>
     </div>
+
+    <div class="cs price" id="price-cs">
+      <button type="button" class="cs-btn"><span>{% if price_active %}${{ '{:,}'.format(pmin) }}–${{ '{:,}'.format(pmax) }}{{ '+' if pmax == price_max }}{% else %}Any price{% endif %}</span><i>▾</i></button>
+      <div class="cs-menu price-menu">
+        <div class="price-vals"><span id="pv-min"></span><span id="pv-max"></span></div>
+        <div class="price-slider">
+          <div class="p-track"></div>
+          <div class="p-range" id="p-range"></div>
+          <input type="range" id="p-min" min="{{ price_min }}" max="{{ price_max }}" step="{{ price_step }}" value="{{ pmin }}">
+          <input type="range" id="p-max" min="{{ price_min }}" max="{{ price_max }}" step="{{ price_step }}" value="{{ pmax }}">
+        </div>
+        <div class="price-actions">
+          <button type="button" id="p-reset">Reset</button>
+          <button type="button" id="p-apply">Apply</button>
+        </div>
+      </div>
+    </div>
+    </div>{# /filters #}
+
+    {% set ns = namespace(chips=[]) %}
+    {% if show in show_labels %}{% set ns.chips = ns.chips + [show_labels[show]] %}{% endif %}
+    {% if sort in sort_labels %}{% set ns.chips = ns.chips + [sort_labels[sort]] %}{% endif %}
+    {% if min_beds|int > 0 %}{% set ns.chips = ns.chips + [min_beds ~ '+ bed'] %}{% endif %}
+    {% if nh_list %}{% set ns.chips = ns.chips + [(nh_list|length ~ ' area' ~ ('' if nh_list|length == 1 else 's'))] %}{% endif %}
+    {% if price_active %}{% set ns.chips = ns.chips + ['$' ~ '{:,}'.format(pmin) ~ '–$' ~ '{:,}'.format(pmax) ~ ('+' if pmax == price_max else '')] %}{% endif %}
+    <button class="filter-summary" id="filter-summary" title="Edit filters">
+      {% for c in ns.chips %}<span class="fs-chip">{{ c }}</span>{% endfor %}
+      {% if not ns.chips %}<span class="fs-none">No filters set</span>{% endif %}
+    </button>
 
     <button class="tinder-open" id="tinder-open" {{ 'disabled' if not rows }}>🔥 Tinder mode</button>
     <a class="tinder-open match {{ 'disabled' if not (emb_ready and liked_total) }}"

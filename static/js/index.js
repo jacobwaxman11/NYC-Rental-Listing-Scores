@@ -50,6 +50,56 @@ document.querySelectorAll('.cs').forEach(cs => {
 });
 document.addEventListener('click', () => document.querySelectorAll('.cs.open').forEach(o => o.classList.remove('open')));
 
+// ── Price dual-range slider ──
+(function () {
+  const lo = document.getElementById('p-min');
+  const hi = document.getElementById('p-max');
+  if (!lo || !hi) return;
+  const range = document.getElementById('p-range');
+  const vMin = document.getElementById('pv-min');
+  const vMax = document.getElementById('pv-max');
+  const PMIN = +lo.min, PMAX = +lo.max;
+  const fmt = v => (+v >= PMAX) ? '$' + (PMAX / 1000) + 'k+' : '$' + (+v).toLocaleString();
+  function paint() {
+    let a = +lo.value, b = +hi.value;
+    if (a > b) { const t = a; a = b; b = t; }
+    range.style.left = ((a - PMIN) / (PMAX - PMIN) * 100) + '%';
+    range.style.right = (100 - (b - PMIN) / (PMAX - PMIN) * 100) + '%';
+    vMin.textContent = fmt(a); vMax.textContent = fmt(b);
+  }
+  // Keep the thumbs from crossing, and repaint as they move.
+  lo.addEventListener('input', () => { if (+lo.value > +hi.value) hi.value = lo.value; paint(); });
+  hi.addEventListener('input', () => { if (+hi.value < +lo.value) lo.value = hi.value; paint(); });
+  paint();
+  // Don't let interacting with the slider close the dropdown.
+  const menu = document.querySelector('#price-cs .cs-menu');
+  if (menu) menu.addEventListener('click', e => e.stopPropagation());
+  document.getElementById('p-reset').addEventListener('click', () => { lo.value = PMIN; hi.value = PMAX; paint(); });
+  document.getElementById('p-apply').addEventListener('click', () => {
+    const a = Math.min(+lo.value, +hi.value), b = Math.max(+lo.value, +hi.value);
+    const u = new URL(window.location);
+    if (a <= PMIN) u.searchParams.delete('pmin'); else u.searchParams.set('pmin', a);
+    if (b >= PMAX) u.searchParams.delete('pmax'); else u.searchParams.set('pmax', b);
+    u.searchParams.delete('refresh');
+    window.location = u;
+  });
+})();
+
+// ── Collapse / summarize filters (persisted) ──
+(function () {
+  const tools = document.querySelector('.tools');
+  const toggle = document.getElementById('filters-toggle');
+  const summary = document.getElementById('filter-summary');
+  if (!tools || !toggle) return;
+  if (localStorage.getItem('filtersCollapsed') === '1') tools.classList.add('collapsed');
+  const setCollapsed = c => {
+    tools.classList.toggle('collapsed', c);
+    localStorage.setItem('filtersCollapsed', c ? '1' : '0');
+  };
+  toggle.addEventListener('click', () => setCollapsed(!tools.classList.contains('collapsed')));
+  if (summary) summary.addEventListener('click', () => setCollapsed(false));
+})();
+
 // ── Reactions (hearts + swipes) ──
 async function react(id, reaction) {
   const res = await fetch('/api/react', {
