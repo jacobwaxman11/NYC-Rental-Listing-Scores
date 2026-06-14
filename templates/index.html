@@ -101,6 +101,7 @@
        title="{{ 'Rank unreviewed listings by similarity to what you liked' if emb_ready else 'Run embed_listings.py first to enable' }}">🧭 Match my likes</a>
     <button class="grp-toggle {{ 'on' if group_on }}" id="grp-toggle" data-group="{{ 0 if group_on else 1 }}"
             title="{{ 'Showing one card per building' if group_on else 'Showing every unit' }}">🏢 {{ 'Grouped' if group_on else 'Flat' }}</button>
+    <button class="view-toggle" id="view-toggle" data-view="grid" {{ 'disabled' if not rows }} title="Toggle map view">🗺 Map</button>
     <a class="refresh" href="/run">⚙ Pipeline</a>
     <a class="refresh" href="/?refresh=1">↻ recompute</a>
   </div>
@@ -199,6 +200,7 @@
     </div>
   {% endfor %}
   </main>
+  <div id="map-view" class="map-view hidden"></div>
 {% endif %}
 
 <!-- Tinder mode -->

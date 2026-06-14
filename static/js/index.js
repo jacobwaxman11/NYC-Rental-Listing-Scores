@@ -64,6 +64,62 @@ document.querySelectorAll('.bldg-toggle').forEach(btn => {
   });
 });
 
+// ── Grid / Map view toggle ──
+// Plots the current (filtered, grouped) listings from DECK on a Leaflet map.
+// Pins are colored by deal (green = below model, red = above); the popup links
+// to the detail page. Built lazily the first time the map is shown.
+(function () {
+  const btn = document.getElementById('view-toggle');
+  const mapEl = document.getElementById('map-view');
+  const grid = document.querySelector('main');
+  if (!btn || !mapEl || !grid) return;
+  let map = null;
+
+  function build() {
+    map = L.map(mapEl, { scrollWheelZoom: true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+    const pts = [];
+    DECK.forEach(r => {
+      if (r.lat == null || r.lng == null) return;
+      pts.push([r.lat, r.lng]);
+      const pct = Math.round(Math.abs(r.pct_diff) * 100);
+      const deal = r.pct_diff < 0
+        ? '<span class="m-deal good">' + pct + '% below</span>'
+        : '<span class="m-deal bad">' + pct + '% above</span>';
+      const photo = (r.img_pos !== null && r.img_pos !== undefined)
+        ? "/img/" + r.listing_id + "/" + r.img_pos : "";
+      const beds = (r.beds == null) ? '?' : Math.round(r.beds);
+      const html =
+        '<a class="m-pop" href="/listing/' + r.listing_id + '">' +
+          (photo ? '<div class="m-photo" style="background-image:url(\'' + photo + '\')"></div>' : '') +
+          '<div class="m-body">' +
+            '<div class="m-rent">$' + r.rent.toLocaleString() + '/mo</div>' +
+            '<div>' + deal + '</div>' +
+            '<div class="m-name">' + r.name + '</div>' +
+            '<div class="m-meta">' + r.neighborhood + ' · ' + beds + ' bd</div>' +
+          '</div></a>';
+      L.circleMarker([r.lat, r.lng], {
+        radius: 7, weight: 1.5, color: '#0b0d11',
+        fillColor: r.pct_diff < 0 ? '#34d399' : '#f87171', fillOpacity: 0.9,
+      }).addTo(map).bindPopup(html, { className: 'm-popup' });
+    });
+    if (pts.length) map.fitBounds(pts, { padding: [40, 40] });
+    else map.setView([40.74, -73.99], 12);
+  }
+
+  function show(isMap) {
+    mapEl.classList.toggle('hidden', !isMap);
+    grid.classList.toggle('hidden', isMap);
+    btn.textContent = isMap ? '▦ Grid' : '🗺 Map';
+    btn.dataset.view = isMap ? 'map' : 'grid';
+    if (isMap) {
+      if (!map) build();
+      setTimeout(() => map.invalidateSize(), 0);   // container was hidden until now
+    }
+  }
+  btn.addEventListener('click', () => show(btn.dataset.view !== 'map'));
+})();
+
 // ── Type-to-filter: a search box inside each list dropdown ──
 (function () {
   document.querySelectorAll('.cs').forEach(cs => {

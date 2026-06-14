@@ -35,6 +35,7 @@ def test_index_renders_with_multi_area_filter():
     assert "StreetEasier" in html
     assert 'class="cs multi" data-name="nh"' in html          # multi-area filter
     assert "data-apply" in html                                # apply button
+    assert 'id="view-toggle"' in html and 'id="map-view"' in html   # map view
 
 
 def test_area_filter_narrows_results():
