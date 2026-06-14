@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 from collections import Counter
 
 import numpy as np
@@ -666,7 +667,7 @@ def index():
     meta = _STATE["meta"]
 
     show = request.args.get("show", "under")           # under | all | liked | passed
-    sort = request.args.get("sort", "deal")            # deal | rent_asc | rent_desc | quality
+    sort = request.args.get("sort", "shuffle")         # shuffle | deal | rent_asc | rent_desc | quality
     nh = request.args.get("nh", "")
     nh_set = {a for a in nh.split(",") if a}   # multi-area filter (comma-separated)
     try:
@@ -724,7 +725,11 @@ def index():
         if tag:
             rows = [r for r in rows if tag in (r.get("tags") or [])]
 
-        if sort == "deal":
+        if sort == "shuffle":
+            # Reshuffled every load so same-building units (which often share a
+            # hero image) don't cluster and look like duplicates.
+            random.shuffle(rows)
+        elif sort == "deal":
             rows.sort(key=lambda r: r["pct_diff"])
         elif sort == "rent_asc":
             rows.sort(key=lambda r: r["rent"])

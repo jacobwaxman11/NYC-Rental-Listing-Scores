@@ -5,6 +5,7 @@
           border-bottom:1px solid var(--line); }
 .d-head .back { color:var(--accent); text-decoration:none; font-size:14px; }
 .d-head h1 { font-size:18px; }
+.d-head .brand .logo { width:25px; height:25px; }
 
 .detail { max-width:1080px; margin:0 auto; padding:22px;
           display:grid; grid-template-columns:1.6fr 1fr; gap:22px; align-items:start; }
