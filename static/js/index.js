@@ -203,6 +203,22 @@ document.querySelectorAll('.bldg-more').forEach(btn => {
   });
 })();
 
+// ── Availability date filter ──
+(function () {
+  const input = document.getElementById('avail-input');
+  if (!input) return;
+  const menu = document.querySelector('#avail-cs .cs-menu');
+  if (menu) menu.addEventListener('click', e => e.stopPropagation());
+  const navDate = v => {
+    const u = new URL(window.location);
+    if (v) u.searchParams.set('avail_before', v); else u.searchParams.delete('avail_before');
+    u.searchParams.delete('refresh');
+    window.location = u;
+  };
+  document.getElementById('avail-reset').addEventListener('click', () => navDate(''));
+  document.getElementById('avail-apply').addEventListener('click', () => navDate(input.value));
+})();
+
 // ── Collapse / summarize filters (persisted) ──
 (function () {
   const tools = document.querySelector('.tools');

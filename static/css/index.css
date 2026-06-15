@@ -104,6 +104,21 @@
   #p-apply { background:var(--accent); border-color:var(--accent); color:var(--bg); font-weight:650; }
   #p-apply:hover { filter:brightness(1.06); }
 
+  /* ── Availability date filter ── */
+  .cs.avail .cs-menu { min-width:230px; padding:12px; }
+  .avail-lbl { display:block; font-size:12px; color:var(--muted); margin-bottom:8px; }
+  #avail-input { width:100%; box-sizing:border-box; background:#0f1218; color:var(--txt);
+                 border:1px solid var(--line); border-radius:8px; padding:8px 10px;
+                 font-size:14px; color-scheme:dark; }
+  #avail-input:focus { outline:none; border-color:var(--accent); }
+  .avail-actions { display:flex; gap:8px; margin-top:12px; }
+  .avail-actions button { flex:1; border-radius:7px; padding:7px; font-size:12px; cursor:pointer;
+                          border:1px solid var(--line); transition:color .12s, border-color .12s, filter .12s; }
+  #avail-reset { background:#1f2734; color:var(--muted); }
+  #avail-reset:hover { color:var(--txt); border-color:#3a4252; }
+  #avail-apply { background:var(--accent); border-color:var(--accent); color:var(--bg); font-weight:650; }
+  #avail-apply:hover { filter:brightness(1.06); }
+
   .tinder-open { background:linear-gradient(135deg,#fb7185,#f59e0b); color:#fff;
                  border:none; border-radius:9px; padding:9px 14px; font-size:13px;
                  font-weight:650; cursor:pointer; }

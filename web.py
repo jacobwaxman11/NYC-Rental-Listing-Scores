@@ -347,6 +347,7 @@ def build_suggestions(db_path: str) -> dict:
                 "baths": listing.get("baths"),
                 "sqft": listing.get("sqft"),
                 "url": listing.get("url"),
+                "available_from": listing.get("available_from"),  # ISO YYYY-MM-DD or None
                 "rent": round(actual),
                 "predicted": round(predicted),
                 "pct_diff": pct_diff,
@@ -757,6 +758,10 @@ def index():
     if pmin > pmax:
         pmin, pmax = pmax, pmin
 
+    # "Available by" cutoff — keep listings whose move-in date is on/before this
+    # ISO YYYY-MM-DD date. Empty = no availability filter.
+    avail_before = request.args.get("avail_before", "").strip()
+
     q = request.args.get("q", "").strip()
     ref = request.args.get("ref", "").strip()
     tag = request.args.get("tag", "").strip()
@@ -796,6 +801,8 @@ def index():
             rows = [r for r in rows if r["reaction"] == "passed"]
         elif show == "liked":
             rows = [r for r in rows if r["reaction"] == "liked"]
+        elif show == "unreviewed":
+            rows = [r for r in rows if not r["reaction"]]
         elif show == "under":
             rows = [r for r in rows if r["pct_diff"] < 0 and r["reaction"] != "passed"]
         else:  # all
@@ -810,6 +817,11 @@ def index():
             rows = [r for r in rows if (r["rent"] or 0) <= pmax]
         if tag:
             rows = [r for r in rows if tag in (r.get("tags") or [])]
+        if avail_before:
+            # ISO dates sort lexically. Keep listings available on/before the
+            # cutoff; those with no known date are excluded while the filter is on.
+            rows = [r for r in rows
+                    if r.get("available_from") and r["available_from"] <= avail_before]
 
         if sort == "shuffle":
             # Reshuffled every load so same-building units (which often share a
@@ -846,6 +858,7 @@ def index():
         liked_total=liked_total, passed_total=passed_total,
         show=show, sort=sort, nh=nh, nh_list=sorted(nh_set), min_beds=str(min_beds),
         pmin=pmin, pmax=pmax, price_min=PRICE_MIN, price_max=PRICE_MAX, price_step=PRICE_STEP,
+        avail_before=avail_before,
         q=q, ref=ref, ref_name=ref_name, searching=searching, active_tag=tag,
         ai_enabled=ai["enabled"], ai_provider=ai["provider"],
         ai_model=ai["model"], ai_banner=ai_banner, distances=distances,

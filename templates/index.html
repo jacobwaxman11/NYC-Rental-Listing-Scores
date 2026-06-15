@@ -82,6 +82,18 @@
         </div>
       </div>
     </div>
+
+    <div class="cs avail" id="avail-cs">
+      <button type="button" class="cs-btn"><span>{% if avail_before %}By {{ avail_before }}{% else %}Any move-in{% endif %}</span><i>▾</i></button>
+      <div class="cs-menu avail-menu">
+        <label class="avail-lbl">Available on or before</label>
+        <input type="date" id="avail-input" value="{{ avail_before }}">
+        <div class="avail-actions">
+          <button type="button" id="avail-reset">Reset</button>
+          <button type="button" id="avail-apply">Apply</button>
+        </div>
+      </div>
+    </div>
     </div>{# /filters #}
 
     {% set ns = namespace(chips=[]) %}
@@ -90,6 +102,7 @@
     {% if min_beds|int > 0 %}{% set ns.chips = ns.chips + [min_beds ~ '+ bed'] %}{% endif %}
     {% if nh_list %}{% set ns.chips = ns.chips + [(nh_list|length ~ ' area' ~ ('' if nh_list|length == 1 else 's'))] %}{% endif %}
     {% if price_active %}{% set ns.chips = ns.chips + ['$' ~ '{:,}'.format(pmin) ~ '–$' ~ '{:,}'.format(pmax) ~ ('+' if pmax == price_max else '')] %}{% endif %}
+    {% if avail_before %}{% set ns.chips = ns.chips + ['by ' ~ avail_before] %}{% endif %}
     <button class="filter-summary" id="filter-summary" title="Edit filters">
       {% for c in ns.chips %}<span class="fs-chip">{{ c }}</span>{% endfor %}
       {% if not ns.chips %}<span class="fs-none">No filters set</span>{% endif %}
