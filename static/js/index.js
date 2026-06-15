@@ -63,6 +63,15 @@ document.querySelectorAll('.bldg-toggle').forEach(btn => {
     btn.classList.toggle('open', !panel.hidden);
   });
 });
+// "+X more" reveals the capped overflow units in a building panel.
+document.querySelectorAll('.bldg-more').forEach(btn => {
+  btn.addEventListener('click', e => {
+    e.preventDefault(); e.stopPropagation();
+    const panel = document.getElementById(btn.dataset.target);
+    if (panel) panel.querySelectorAll('.bldg-unit.extra').forEach(u => { u.hidden = false; });
+    btn.remove();
+  });
+});
 
 // ── Grid / Map view toggle ──
 // Plots the current (filtered, grouped) listings from DECK on a Leaflet map.

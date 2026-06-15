@@ -48,17 +48,20 @@ def test_area_filter_narrows_results():
 
 
 def test_building_grouping():
-    web._STATE["suggestions"] = [
-        _row("bldgX_1", "Unit 1", "Chelsea", 40.74, -73.99),
-        _row("bldgX_2", "Unit 2", "Chelsea", 40.74, -73.99),
-        _row("bldgY_1", "Solo", "LES", 40.72, -74.00),
-    ]
-    web._STATE["meta"] = {"total": 3, "underpriced": 3, "cv": True,
+    # bldgX has 8 units (lead + 7 others); bldgY has 1.
+    web._STATE["suggestions"] = (
+        [_row(f"bldgX_{i}", f"Unit {i}", "Chelsea", 40.74, -73.99) for i in range(1, 9)]
+        + [_row("bldgY_1", "Solo", "LES", 40.72, -74.00)]
+    )
+    web._STATE["meta"] = {"total": 9, "underpriced": 9, "cv": True,
                           "neighborhoods": ["Chelsea", "LES"]}
-    # Grouped (default): the two bldgX units collapse to one card with a badge.
+    # Grouped (default): bldgX collapses to one card; badge shows the total.
     html = web.app.test_client().get("/?show=all").get_data(as_text=True)
-    assert "units in this building" in html
+    assert "8 units in this building" in html
     assert "across 2 buildings" in html               # header indicator
+    # 7 others, capped at 5 → a "+2 more" reveal, and the overflow rows are hidden.
+    assert "+2 more in this building" in html
+    assert 'class="bldg-unit extra"' in html
     # Flat: every unit is its own card, no grouping badge.
     flat = web.app.test_client().get("/?show=all&group=0").get_data(as_text=True)
     assert "units in this building" not in flat

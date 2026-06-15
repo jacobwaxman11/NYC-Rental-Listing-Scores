@@ -166,6 +166,9 @@
   .bldg-unit .u-meta { color:var(--muted); flex:1; }
   .bldg-unit .u-deal.good { color:var(--good); font-weight:600; }
   .bldg-unit .u-deal.bad { color:var(--bad); }
+  .bldg-more { align-self:flex-start; background:none; border:none; color:var(--accent);
+               cursor:pointer; font-size:12px; padding:5px 7px; }
+  .bldg-more:hover { text-decoration:underline; }
 
   /* Map view */
   .view-toggle { background:var(--card); color:var(--muted); border:1px solid var(--line);

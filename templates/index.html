@@ -188,12 +188,15 @@
           </button>
           <div class="bldg-units" id="bldg-{{ r.listing_id }}" hidden>
             {% for o in others %}
-              <a class="bldg-unit" href="/listing/{{ o.listing_id }}">
+              <a class="bldg-unit{{ ' extra' if loop.index0 >= 5 }}" href="/listing/{{ o.listing_id }}"{{ ' hidden' if loop.index0 >= 5 }}>
                 <span class="u-rent">${{ '{:,}'.format(o.rent) }}</span>
                 <span class="u-meta">{{ (o.beds|int) if o.beds is not none else '?' }} bd / {{ o.baths if o.baths is not none else '?' }} ba{% if o.sqft %} · {{ '{:,}'.format(o.sqft) }} ft²{% endif %}</span>
                 {% if o.pct_diff < 0 %}<span class="u-deal good">{{ '%.0f'|format(-o.pct_diff*100) }}% below</span>{% else %}<span class="u-deal bad">{{ '%.0f'|format(o.pct_diff*100) }}% above</span>{% endif %}
               </a>
             {% endfor %}
+            {% if others|length > 5 %}
+              <button class="bldg-more" type="button" data-target="bldg-{{ r.listing_id }}">+{{ others|length - 5 }} more in this building</button>
+            {% endif %}
           </div>
         {% endif %}
       </div>
