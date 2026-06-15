@@ -215,6 +215,11 @@
                color:#fff; font-size:15px; cursor:pointer; backdrop-filter:blur(4px);
                display:flex; align-items:center; justify-content:center; transition:transform .12s, color .12s; }
   .card-pass:hover { transform:scale(1.12); color:var(--bad); }
+  /* Per-card area map (mounted lazily as the card scrolls into view).
+     Display-only — pointer-events off so clicking it still opens the card. */
+  .card-map { height:92px; border-radius:10px; overflow:hidden; background:#0b0d11;
+              pointer-events:none; }
+  .card-map .leaflet-container { background:#0b0d11; }
   .undo { position:absolute; top:10px; left:10px; width:36px; height:36px;
           border:none; border-radius:50%; background:rgba(15,17,21,.55);
           color:#fff; font-size:16px; cursor:pointer; backdrop-filter:blur(4px);

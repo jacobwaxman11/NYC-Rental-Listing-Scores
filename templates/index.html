@@ -43,12 +43,12 @@
     {{ "out-of-fold (grouped by building)" if meta.cv else "in-sample fit" }}
   </span>
   {% set sort_labels = {'deal':'Biggest discount','rent_asc':'Rent ↑','rent_desc':'Rent ↓','quality':'Photo quality'} %}
-  {% set show_labels = {'all':'All listings','liked':'❤ Liked','passed':'✕ Passed'} %}
+  {% set show_labels = {'all':'All listings','liked':'❤ Liked','passed':'✕ Passed','unreviewed':'🆕 Unreviewed'} %}
   {% set price_active = pmin != price_min or pmax != price_max %}
   <div class="tools">
     <button class="filters-toggle" id="filters-toggle" title="Show / hide filters">⚙ Filters</button>
     <div class="filters" id="filters">
-    {{ csel('show', show, {'under':'Underpriced only','all':'All listings','liked':'❤ Liked','passed':'✕ Passed'}) }}
+    {{ csel('show', show, {'under':'Underpriced only','all':'All listings','unreviewed':'🆕 Unreviewed','liked':'❤ Liked','passed':'✕ Passed'}) }}
     {{ csel('sort', sort, {'shuffle':'Shuffle','deal':'Biggest discount','rent_asc':'Rent: low → high','rent_desc':'Rent: high → low','quality':'Photo quality'}) }}
     {{ csel('beds', min_beds, {'0':'Any beds','1':'1+ bed','2':'2+ bed','3':'3+ bed'}) }}
 
@@ -164,6 +164,7 @@
           {{ (r.beds|int) if r.beds is not none else '?' }} bd /
           {{ r.baths if r.baths is not none else '?' }} ba{% if r.sqft %} · {{ '{:,}'.format(r.sqft) }} ft²{% endif %}{% if distances.get(r.listing_id) is not none %} · <span class="dist">{{ '%.1f'|format(distances[r.listing_id]) }} mi away</span>{% endif %}
         </div>
+        {% if r.lat and r.lng %}<div class="card-map" data-id="{{ r.listing_id }}"></div>{% endif %}
         {% if r.tags %}
           <div class="tags">
             {% for t in r.tags[:6] %}<a class="tag {{ 'active' if t == active_tag }}" href="/?tag={{ t }}">{{ t.replace('_', ' ') }}</a>{% endfor %}
