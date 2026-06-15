@@ -59,8 +59,8 @@ def test_building_grouping():
     html = web.app.test_client().get("/?show=all").get_data(as_text=True)
     assert "8 units in this building" in html
     assert "across 2 buildings" in html               # header indicator
-    # 7 others, capped at 5 → a "+2 more" reveal, and the overflow rows are hidden.
-    assert "+2 more in this building" in html
+    # 7 others, capped at 4 → a "+3 more" reveal, and the overflow rows are hidden.
+    assert "+3 more in this building" in html
     assert 'class="bldg-unit extra"' in html
     # Flat: every unit is its own card, no grouping badge.
     flat = web.app.test_client().get("/?show=all&group=0").get_data(as_text=True)
