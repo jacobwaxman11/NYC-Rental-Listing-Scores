@@ -309,6 +309,35 @@ document.querySelectorAll('.card[data-href] .photo[data-id]').forEach(photo => {
   });
 });
 
+// ── Per-card area maps (lazy) ──
+// A small display-only Leaflet map per card, mounted only while the card is on
+// (or near) screen and torn down when it scrolls away — so a 100-card grid
+// doesn't spin up 100 maps or hammer the tile server.
+(function () {
+  const maps = document.querySelectorAll('.card-map[data-id]');
+  if (!maps.length || !window.L || !('IntersectionObserver' in window)) return;
+
+  function mount(el) {
+    const r = DECK_BY_ID[el.dataset.id];
+    if (!r || r.lat == null || r.lng == null || el._map) return;
+    const m = L.map(el, {
+      zoomControl: false, attributionControl: false, dragging: false,
+      scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false,
+      keyboard: false, touchZoom: false, tap: false,
+    }).setView([r.lat, r.lng], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
+    L.marker([r.lat, r.lng]).addTo(m);
+    el._map = m;
+  }
+  function unmount(el) { if (el._map) { el._map.remove(); el._map = null; } }
+
+  const io = new IntersectionObserver(
+    entries => entries.forEach(e => e.isIntersecting ? mount(e.target) : unmount(e.target)),
+    { rootMargin: '250px' }                          // preload a little before they enter
+  );
+  maps.forEach(el => io.observe(el));
+})();
+
 const refInput = document.getElementById('ref');
 const refChip = document.getElementById('ref-chip');
 const refClear = document.getElementById('ref-clear');
@@ -330,14 +359,11 @@ let history = [];   // {idx, id, prev} per decision, for undo
 let toastTimer = null;
 
 // Photo paging: each row carries `img_positions` (ordered photo indices) and we
-// track which one is showing in `r._pi`. It starts on the representative photo
-// (`img_pos`) so the first thing you see is the same hero shot as the grid.
+// track which one is showing in `r._pi`. Every card starts on its first photo
+// (renderDeck resets this between swipes) so a new card never opens mid-gallery.
 function photoCount(r) { return (r.img_positions && r.img_positions.length) || 0; }
 function curPhotoIdx(r) {
-  if (r._pi === undefined) {
-    const k = r.img_positions ? r.img_positions.indexOf(r.img_pos) : -1;
-    r._pi = k >= 0 ? k : 0;
-  }
+  if (r._pi === undefined) r._pi = 0;            // start on the first photo
   return r._pi;
 }
 function curPhotoPos(r) {
@@ -406,6 +432,11 @@ function renderDeck() {
   counter.textContent = ti < DECK.length ? (ti + 1) + ' / ' + DECK.length : DECK.length + ' / ' + DECK.length;
   if (ti >= DECK.length) { doneEl.classList.remove('hidden'); return; }
   doneEl.classList.add('hidden');
+
+  // Reset the visible cards to their first photo, so paging through one card's
+  // photos never carries over to the next card (or a re-shown undo card).
+  if (DECK[ti]) DECK[ti]._pi = 0;
+  if (DECK[ti + 1]) DECK[ti + 1]._pi = 0;
 
   // Card behind (depth), if present.
   if (ti + 1 < DECK.length) {
