@@ -87,6 +87,21 @@
 .chip-a.tag { color:var(--muted); }
 .chip-a.tag:hover { color:var(--accent); border-color:var(--accent); }
 
+/* Other units in the same building */
+.bldg-units h2 .count { color:var(--muted); font-weight:500; font-size:14px; }
+.unit-list { display:grid; gap:12px; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
+.unit { display:flex; flex-direction:column; background:#0f1218; border:1px solid var(--line);
+        border-radius:12px; overflow:hidden; text-decoration:none; color:var(--txt);
+        transition:border-color .15s, transform .15s; }
+.unit:hover { border-color:#3a4252; transform:translateY(-2px); }
+.unit-photo { aspect-ratio:4/3; background:#0b0d11 center/cover no-repeat; }
+.unit-body { padding:10px 12px 12px; display:flex; flex-direction:column; gap:6px; }
+.unit-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.unit-rent { font-size:16px; font-weight:700; }
+.unit-rent .mo { font-size:12px; color:var(--muted); font-weight:400; }
+.unit-top .badge { padding:2px 8px; border-radius:999px; font-size:11px; font-weight:650; }
+.unit-meta { color:var(--muted); font-size:12px; }
+
 /* Map */
 #map { height:360px; border-radius:12px; overflow:hidden; }
 .leaflet-container { background:#0b0d11; }

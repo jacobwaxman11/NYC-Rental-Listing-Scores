@@ -890,12 +890,35 @@ def listing_detail(listing_id: str):
         images = dbm.get_listing_images(conn, listing_id)
         reaction = dbm.get_reactions(conn).get(listing_id)
 
+        # Other units in the same building — small cards linking to their pages,
+        # enriched with the model's deal % where the unit has been scored.
+        siblings = []
+        building = listing.get("building_slug")
+        if building:
+            sugg_by_id = {r["listing_id"]: r for r in _STATE["suggestions"]}
+            sib_rows = conn.execute(
+                "SELECT listing_id, name, unit, rent, beds, baths "
+                "FROM listings WHERE building_slug=? AND listing_id<>? "
+                "ORDER BY rent IS NULL, rent",
+                (building, listing_id),
+            ).fetchall()
+            for row in sib_rows:
+                sib = dict(row)
+                sr = sugg_by_id.get(sib["listing_id"])
+                if sr and sr.get("img_pos") is not None:
+                    sib["img_pos"] = sr["img_pos"]
+                else:
+                    sib_imgs = dbm.get_listing_images(conn, sib["listing_id"])
+                    sib["img_pos"] = sib_imgs[0]["position"] if sib_imgs else None
+                sib["pct_diff"] = sr["pct_diff"] if sr else None
+                siblings.append(sib)
+
     positions = [im["position"] for im in images]
     tags = srow.get("tags", []) if srow else []
     return render_template(
         "listing.html",
         l=listing, s=srow, amenities=amenities, positions=positions,
-        tags=tags, reaction=reaction,
+        tags=tags, reaction=reaction, siblings=siblings,
     )
 
 

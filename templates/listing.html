@@ -103,6 +103,30 @@
   </section>
   {% endif %}
 
+  <!-- Other units in the same building -->
+  {% if siblings %}
+  <section class="block bldg-units">
+    <h2>Other units at {{ l.street or 'this building' }} <span class="count">{{ siblings|length }}</span></h2>
+    <div class="unit-list">
+      {% for u in siblings %}
+      <a class="unit" href="/listing/{{ u.listing_id }}">
+        <div class="unit-photo"{% if u.img_pos is not none %} style="background-image:url('/img/{{ u.listing_id }}/{{ u.img_pos }}')"{% endif %}></div>
+        <div class="unit-body">
+          <div class="unit-top">
+            <span class="unit-rent">${{ '{:,}'.format(u.rent) if u.rent else '—' }}<span class="mo">/mo</span></span>
+            {% if u.pct_diff is not none %}
+              {% if u.pct_diff < 0 %}<span class="badge good">{{ '%.0f'|format(-u.pct_diff*100) }}% below</span>
+              {% else %}<span class="badge bad">{{ '%.0f'|format(u.pct_diff*100) }}% above</span>{% endif %}
+            {% endif %}
+          </div>
+          <div class="unit-meta">{{ ('Unit ' ~ u.unit) if u.unit else u.name }} · {{ (u.beds|int) if u.beds is not none else '?' }} bd / {{ u.baths if u.baths is not none else '?' }} ba</div>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   <!-- Amenities -->
   {% if amenities %}
   <section class="block">
