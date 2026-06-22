@@ -367,6 +367,7 @@ def build_suggestions(db_path: str) -> dict:
         "underpriced": sum(1 for r in rows if r["pct_diff"] < 0),
         "cv": n_groups >= 2 and len(rows) >= 5,
         "neighborhoods": sorted({r["neighborhood"] for r in rows if r["neighborhood"] != "—"}),
+        "tags": sorted({t for r in rows for t in (r.get("tags") or [])}),
     }
     return {"suggestions": rows, "meta": meta}
 
@@ -762,9 +763,39 @@ def index():
     # ISO YYYY-MM-DD date. Empty = no availability filter.
     avail_before = request.args.get("avail_before", "").strip()
 
+    # Tag filter — multi-select with an any/all mode. `tag` (legacy single-tag
+    # chip link) folds into the same set.
+    tag = request.args.get("tag", "").strip()
+    tag_set = {t for t in request.args.get("tags", "").split(",") if t}
+    if tag:
+        tag_set.add(tag)
+    tag_mode = request.args.get("tagmode", "any").lower()
+    if tag_mode not in ("any", "all"):
+        tag_mode = "any"
+
+    # Location filters. `near_*` = radius from a geocoded point; `bbox` = a box
+    # drawn on the map ("south,west,north,east").
+    def _float_arg(name: str):
+        try:
+            return float(request.args.get(name))
+        except (TypeError, ValueError):
+            return None
+    near_lat = _float_arg("near_lat")
+    near_lng = _float_arg("near_lng")
+    near_label = request.args.get("near_label", "").strip()
+    radius_mi = _float_arg("radius_mi") or 1.0
+    near_on = near_lat is not None and near_lng is not None
+    bbox = request.args.get("bbox", "").strip()
+    bbox_vals = None
+    if bbox:
+        try:
+            s, w, n, e = (float(x) for x in bbox.split(","))
+            bbox_vals = (s, w, n, e)
+        except (ValueError, TypeError):
+            bbox_vals = None
+
     q = request.args.get("q", "").strip()
     ref = request.args.get("ref", "").strip()
-    tag = request.args.get("tag", "").strip()
     match = request.args.get("match", "").strip()
     similar = request.args.get("similar", "").strip()
     ai = _STATE["ai"]
@@ -815,8 +846,24 @@ def index():
             rows = [r for r in rows if (r["rent"] or 0) >= pmin]
         if pmax < PRICE_MAX:
             rows = [r for r in rows if (r["rent"] or 0) <= pmax]
-        if tag:
-            rows = [r for r in rows if tag in (r.get("tags") or [])]
+        if tag_set:
+            if tag_mode == "all":
+                rows = [r for r in rows if tag_set <= set(r.get("tags") or [])]
+            else:
+                rows = [r for r in rows if tag_set & set(r.get("tags") or [])]
+        if near_on:
+            rows = [
+                r for r in rows
+                if (d := geo.haversine_mi(r.get("lat"), r.get("lng"), near_lat, near_lng)) is not None
+                and d <= radius_mi
+            ]
+        if bbox_vals:
+            s, w, n, e = bbox_vals
+            rows = [
+                r for r in rows
+                if r.get("lat") is not None and r.get("lng") is not None
+                and s <= r["lat"] <= n and w <= r["lng"] <= e
+            ]
         if avail_before:
             # ISO dates sort lexically. Keep listings available on/before the
             # cutoff; those with no known date are excluded while the filter is on.
@@ -859,6 +906,9 @@ def index():
         show=show, sort=sort, nh=nh, nh_list=sorted(nh_set), min_beds=str(min_beds),
         pmin=pmin, pmax=pmax, price_min=PRICE_MIN, price_max=PRICE_MAX, price_step=PRICE_STEP,
         avail_before=avail_before,
+        tag_list=sorted(tag_set), tag_mode=tag_mode,
+        near_lat=near_lat, near_lng=near_lng, near_label=near_label,
+        radius_mi=radius_mi, near_on=near_on, bbox=bbox,
         q=q, ref=ref, ref_name=ref_name, searching=searching, active_tag=tag,
         ai_enabled=ai["enabled"], ai_provider=ai["provider"],
         ai_model=ai["model"], ai_banner=ai_banner, distances=distances,

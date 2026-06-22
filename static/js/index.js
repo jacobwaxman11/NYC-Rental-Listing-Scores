@@ -43,6 +43,9 @@ document.querySelectorAll('.cs').forEach(cs => {
     relabel();
     return;   // skip single-select navigation wiring
   }
+  // Tags + price + near have their own dedicated handlers below.
+  if (cs.classList.contains('tagsel') || cs.classList.contains('price')
+      || cs.classList.contains('near')) return;
 
   cs.querySelectorAll('.cs-menu li').forEach(li => {
     li.addEventListener('click', () => go(cs.dataset.param, li.dataset.value));
@@ -217,6 +220,91 @@ document.querySelectorAll('.bldg-more').forEach(btn => {
   };
   document.getElementById('avail-reset').addEventListener('click', () => navDate(''));
   document.getElementById('avail-apply').addEventListener('click', () => navDate(input.value));
+})();
+
+// ── Tags multi-select (with an any/all mode) ──
+(function () {
+  const cs = document.getElementById('tag-cs');
+  if (!cs) return;
+  const items = () => [...cs.querySelectorAll('.cs-menu li[data-value]')];
+  const label = cs.querySelector('.cs-btn span');
+  let mode = cs.dataset.mode === 'all' ? 'all' : 'any';
+
+  const relabel = () => {
+    const n = items().filter(li => li.classList.contains('sel')).length;
+    label.textContent = n === 0 ? 'All tags' : n + ' tag' + (n === 1 ? '' : 's');
+  };
+  items().forEach(li => li.addEventListener('click', e => {
+    e.stopPropagation(); li.classList.toggle('sel'); relabel();
+  }));
+  const tools = cs.querySelector('.cs-tools');
+  if (tools) tools.addEventListener('click', e => e.stopPropagation());
+  const modeBtns = cs.querySelectorAll('[data-mode]');
+  modeBtns.forEach(b => b.addEventListener('click', () => {
+    mode = b.dataset.mode;
+    modeBtns.forEach(x => x.classList.toggle('on', x === b));
+  }));
+  cs.querySelector('[data-none]')?.addEventListener('click', () => {
+    items().forEach(li => li.classList.remove('sel')); relabel();
+  });
+  cs.querySelector('[data-apply]')?.addEventListener('click', () => {
+    const sel = items().filter(li => li.classList.contains('sel')).map(li => li.dataset.value);
+    const u = new URL(window.location);
+    u.searchParams.delete('tag');                 // drop the legacy single-tag link
+    if (sel.length) u.searchParams.set('tags', sel.join(',')); else u.searchParams.delete('tags');
+    if (sel.length && mode === 'all') u.searchParams.set('tagmode', 'all'); else u.searchParams.delete('tagmode');
+    u.searchParams.delete('refresh');
+    window.location = u;
+  });
+  relabel();
+})();
+
+// ── "Near" radius filter — geocode an address (Nominatim) on Apply ──
+(function () {
+  const cs = document.getElementById('near-cs');
+  if (!cs) return;
+  const input = document.getElementById('near-input');
+  const radius = document.getElementById('near-radius');
+  const rmi = document.getElementById('near-rmi');
+  const status = document.getElementById('near-status');
+  const menu = cs.querySelector('.cs-menu');
+  if (menu) menu.addEventListener('click', e => e.stopPropagation());
+
+  radius.addEventListener('input', () => { rmi.textContent = radius.value; });
+
+  function navTo(lat, lng, labelText) {
+    const u = new URL(window.location);
+    if (lat == null) {
+      ['near_lat', 'near_lng', 'near_label', 'radius_mi'].forEach(p => u.searchParams.delete(p));
+    } else {
+      u.searchParams.set('near_lat', lat);
+      u.searchParams.set('near_lng', lng);
+      u.searchParams.set('near_label', labelText);
+      u.searchParams.set('radius_mi', radius.value);
+    }
+    u.searchParams.delete('refresh');
+    window.location = u;
+  }
+
+  document.getElementById('near-clear').addEventListener('click', () => navTo(null));
+  document.getElementById('near-apply').addEventListener('click', async () => {
+    const q = input.value.trim();
+    if (!q) { navTo(null); return; }
+    // If we already have a pinned point and only the radius changed, reuse it.
+    const lat0 = document.getElementById('near-lat').value;
+    const lng0 = document.getElementById('near-lng').value;
+    if (lat0 && lng0 && q === (input.dataset.geocoded || '')) { navTo(lat0, lng0, q); return; }
+    status.textContent = 'Locating…';
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+        + encodeURIComponent(q + ', New York, NY');
+      const data = await (await fetch(url, { headers: { 'Accept-Language': 'en' } })).json();
+      if (!data.length) { status.textContent = '✗ Not found — try another address.'; return; }
+      navTo(parseFloat(data[0].lat), parseFloat(data[0].lon), q);
+    } catch (e) {
+      status.textContent = '✗ Lookup failed (no internet?).';
+    }
+  });
 })();
 
 // ── Collapse / summarize filters (persisted) ──

@@ -94,6 +94,38 @@
         </div>
       </div>
     </div>
+
+    <div class="cs tagsel" id="tag-cs" data-mode="{{ tag_mode }}">
+      <button type="button" class="cs-btn"><span>{% if tag_list %}{{ tag_list|length }} tag{{ '' if tag_list|length == 1 else 's' }}{% else %}All tags{% endif %}</span><i>▾</i></button>
+      <ul class="cs-menu">
+        <li class="cs-tools">
+          <button type="button" class="mode {{ 'on' if tag_mode != 'all' }}" data-mode="any">Any</button>
+          <button type="button" class="mode {{ 'on' if tag_mode == 'all' }}" data-mode="all">All</button>
+          <button type="button" data-none>Clear</button>
+          <button type="button" data-apply>Apply</button>
+        </li>
+        {% for t in meta.tags %}
+          <li data-value="{{ t }}" class="opt {{ 'sel' if t in tag_list }}"><span class="ck"></span><span class="nm">{{ t.replace('_', ' ') }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="cs near" id="near-cs">
+      <button type="button" class="cs-btn"><span>{% if near_on %}📍 {{ near_label or 'Pinned' }} · {{ radius_mi }}mi{% else %}📍 Near…{% endif %}</span><i>▾</i></button>
+      <div class="cs-menu near-menu">
+        <label class="near-lbl">Address or landmark</label>
+        <input type="text" id="near-input" placeholder="e.g. Union Square" value="{{ near_label }}" autocomplete="off">
+        <div class="near-status" id="near-status"></div>
+        <label class="near-lbl">Within <b id="near-rmi">{{ radius_mi }}</b> mi</label>
+        <input type="range" id="near-radius" min="0.25" max="5" step="0.25" value="{{ radius_mi }}">
+        <div class="near-actions">
+          <button type="button" id="near-clear">Clear</button>
+          <button type="button" id="near-apply">Apply</button>
+        </div>
+      </div>
+      <input type="hidden" id="near-lat" value="{{ near_lat if near_on else '' }}">
+      <input type="hidden" id="near-lng" value="{{ near_lng if near_on else '' }}">
+    </div>
     </div>{# /filters #}
 
     {% set ns = namespace(chips=[]) %}
@@ -103,6 +135,9 @@
     {% if nh_list %}{% set ns.chips = ns.chips + [(nh_list|length ~ ' area' ~ ('' if nh_list|length == 1 else 's'))] %}{% endif %}
     {% if price_active %}{% set ns.chips = ns.chips + ['$' ~ '{:,}'.format(pmin) ~ '–$' ~ '{:,}'.format(pmax) ~ ('+' if pmax == price_max else '')] %}{% endif %}
     {% if avail_before %}{% set ns.chips = ns.chips + ['by ' ~ avail_before] %}{% endif %}
+    {% if tag_list %}{% set ns.chips = ns.chips + [(tag_list|length ~ ' tag' ~ ('' if tag_list|length == 1 else 's') ~ (' · all' if tag_mode == 'all' else ''))] %}{% endif %}
+    {% if near_on %}{% set ns.chips = ns.chips + ['📍 ' ~ (near_label or 'pinned') ~ ' · ' ~ radius_mi ~ 'mi'] %}{% endif %}
+    {% if bbox %}{% set ns.chips = ns.chips + ['▭ map area'] %}{% endif %}
     <button class="filter-summary" id="filter-summary" title="Edit filters">
       {% for c in ns.chips %}<span class="fs-chip">{{ c }}</span>{% endfor %}
       {% if not ns.chips %}<span class="fs-none">No filters set</span>{% endif %}
