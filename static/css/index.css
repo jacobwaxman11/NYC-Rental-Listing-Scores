@@ -176,6 +176,10 @@
                 border-top:1px solid var(--line); padding-top:8px; }
   .bldg-unit { display:flex; align-items:baseline; gap:10px; text-decoration:none;
                color:var(--txt); font-size:13px; padding:5px 7px; border-radius:7px; }
+  /* The display:flex above otherwise overrides the [hidden] attribute (same
+     specificity, author rule wins), leaving collapsed panels / overflow units
+     visible. This higher-specificity rule restores hide-on-[hidden]. */
+  .bldg-units[hidden], .bldg-unit[hidden] { display:none; }
   .bldg-unit:hover { background:#222732; }
   .bldg-unit .u-rent { font-weight:700; min-width:62px; }
   .bldg-unit .u-meta { color:var(--muted); flex:1; }
