@@ -220,6 +220,12 @@
   main.hidden, .map-view.hidden { display:none; }
   .map-view { height:calc(100vh - 210px); min-height:420px; margin:0 28px 28px;
               border:1px solid var(--line); border-radius:14px; overflow:hidden; z-index:1; }
+  .map-ctrl { display:flex; flex-direction:column; gap:6px; }
+  .map-ctrl button { background:var(--card); color:var(--txt); border:1px solid var(--line);
+                     border-radius:8px; padding:7px 11px; font-size:13px; cursor:pointer;
+                     box-shadow:0 2px 8px rgba(0,0,0,.35); white-space:nowrap; }
+  .map-ctrl button:hover { border-color:#3a4252; }
+  .map-ctrl button.on { background:var(--accent); border-color:var(--accent); color:var(--bg); font-weight:650; }
   .m-popup .leaflet-popup-content-wrapper { background:var(--card); color:var(--txt);
               border:1px solid var(--line); border-radius:12px; }
   .m-popup .leaflet-popup-content { margin:0; }

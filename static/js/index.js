@@ -117,6 +117,65 @@ document.querySelectorAll('.bldg-more').forEach(btn => {
     });
     if (pts.length) map.fitBounds(pts, { padding: [40, 40] });
     else map.setView([40.74, -73.99], 12);
+    addAreaControl();
+  }
+
+  // ── Area filtering: draw a box, or use the current view, as a bbox filter ──
+  const bboxActive = new URLSearchParams(location.search).has('bbox');
+
+  function applyBbox(b) {
+    const u = new URL(window.location);
+    u.searchParams.set('bbox',
+      [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map(x => x.toFixed(5)).join(','));
+    u.searchParams.delete('refresh');
+    window.location = u;
+  }
+  function clearBbox() {
+    const u = new URL(window.location);
+    u.searchParams.delete('bbox'); u.searchParams.delete('refresh');
+    window.location = u;
+  }
+
+  let drawing = false, start = null, rect = null, drawBtn = null;
+  function setDraw(on) {
+    drawing = on;
+    if (drawBtn) { drawBtn.classList.toggle('on', on); drawBtn.textContent = on ? '▭ Drawing…' : '▭ Draw area'; }
+    map.getContainer().style.cursor = on ? 'crosshair' : '';
+    if (on) { map.dragging.disable(); map.on('mousedown', dStart); }
+    else { map.dragging.enable(); map.off('mousedown', dStart); }
+  }
+  function dStart(e) {
+    start = e.latlng;
+    if (rect) { map.removeLayer(rect); rect = null; }
+    map.on('mousemove', dMove); map.on('mouseup', dEnd);
+  }
+  function dMove(e) {
+    const b = L.latLngBounds(start, e.latlng);
+    if (rect) rect.setBounds(b);
+    else rect = L.rectangle(b, { color: '#60a5fa', weight: 2, fillOpacity: 0.12 }).addTo(map);
+  }
+  function dEnd() {
+    map.off('mousemove', dMove); map.off('mouseup', dEnd);
+    setDraw(false);
+    if (rect && start) applyBbox(rect.getBounds());
+  }
+
+  function addAreaControl() {
+    const ctrl = L.control({ position: 'topright' });
+    ctrl.onAdd = () => {
+      const d = L.DomUtil.create('div', 'map-ctrl');
+      d.innerHTML =
+        '<button id="mc-draw">▭ Draw area</button>' +
+        '<button id="mc-here">⧉ This area</button>' +
+        (bboxActive ? '<button id="mc-clear">✕ Clear area</button>' : '');
+      L.DomEvent.disableClickPropagation(d);
+      return d;
+    };
+    ctrl.addTo(map);
+    drawBtn = document.getElementById('mc-draw');
+    drawBtn.addEventListener('click', () => setDraw(!drawing));
+    document.getElementById('mc-here').addEventListener('click', () => applyBbox(map.getBounds()));
+    document.getElementById('mc-clear')?.addEventListener('click', clearBbox);
   }
 
   function show(isMap) {
