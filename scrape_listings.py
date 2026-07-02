@@ -8,6 +8,9 @@ available_from, floor plan) are filled in afterwards by ``backfill_details.py``.
 Re-runs are additive and idempotent: existing listing_ids are skipped, and only
 newly-discovered listings get processed.
 
+Parsing/URL helpers live in :mod:`scrape_parse`; the shared request headers and
+file downloader in :mod:`scrape_http` (both re-exported here for callers/tests).
+
 Example:
     python scrape_listings.py \\
         --price-min 4000 --price-max 6000 \\
@@ -23,7 +26,6 @@ jersey-city. Legacy numeric area IDs (e.g. 115) still work too.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import random
 import sqlite3
@@ -31,178 +33,19 @@ import time
 from typing import Optional
 
 import httpx
-from bs4 import BeautifulSoup
 
 import db as dbm
 import poll_state
+from scrape_http import HEADERS, _download_one, download_images
+from scrape_parse import build_url, fetch_search_page, parse_listing
 
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://streeteasy.com/",
-}
-
-
-# ── URL + parsing helpers ────────────────────────────────────────────────────
-
-
-def build_url(price_min: int, price_max: int, area: str, page: int = 1,
-              sort: str = "listed_desc") -> str:
-    """Build a search URL for ONE StreetEasy area.
-
-    ``area`` is either a neighborhood slug — the reliable, human-readable form,
-    e.g. ``west-village``, ``williamsburg``, ``hoboken`` (grab it from a
-    ``streeteasy.com/for-rent/<slug>`` URL) — or a legacy numeric area ID. Slugs
-    use ``/for-rent/<slug>/…``; numeric IDs use ``/for-rent/nyc/…|area:<id>``.
-
-    ``sort`` defaults to ``listed_desc`` (newest first) so delta polling can
-    early-stop once it reaches already-known listings.
-    """
-    area = str(area).strip()
-    if area.isdigit():
-        path = f"/for-rent/nyc/price:{price_min}-{price_max}|area:{area}"
-    else:
-        path = f"/for-rent/{area}/price:{price_min}-{price_max}"
-    params = []
-    if sort:
-        params.append(f"sort_by={sort}")
-    if page > 1:
-        params.append(f"page={page}")
-    if params:
-        path += "?" + "&".join(params)
-    return f"https://streeteasy.com{path}"
-
-
-def parse_listing(apt: dict) -> dict:
-    """Extract fields from a schema.org Apartment object on the search page."""
-    props = {p["name"]: p["value"] for p in apt.get("additionalProperty", [])}
-
-    rent_str = props.get("Monthly Rent", "")
-    rent = (
-        int(rent_str.replace("$", "").replace(",", "").replace("/mo", ""))
-        if rent_str
-        else None
-    )
-
-    sqft = apt.get("floorSize", {}).get("value") if apt.get("floorSize") else None
-    lease = apt.get("leaseLength", {}).get("value") if apt.get("leaseLength") else None
-    address = apt.get("address", {}) or {}
-    image_urls = [img["url"] for img in apt.get("image", []) if img.get("url")]
-
-    # Split the URL path into building slug + unit.
-    # e.g. ".../building/stonehenge-gardens/006j" -> building="stonehenge-gardens", unit="006j"
-    id_parts = [p for p in apt.get("@id", "").split("/") if p]
-    building_slug = id_parts[-2] if len(id_parts) >= 2 else ""
-    unit = id_parts[-1] if id_parts else ""
-    listing_id = f"{building_slug}_{unit}" if building_slug else unit
-
-    return {
-        "listing_id": listing_id,
-        "building_slug": building_slug,
-        "unit": unit,
-        "url": apt.get("url"),
-        "name": apt.get("name"),
-        "street": address.get("streetAddress"),
-        "neighborhood": address.get("addressLocality"),
-        "zip": address.get("postalCode"),
-        "lat": apt.get("geo", {}).get("latitude") if apt.get("geo") else None,
-        "lng": apt.get("geo", {}).get("longitude") if apt.get("geo") else None,
-        "beds": apt.get("numberOfBedrooms"),
-        "baths": apt.get("numberOfBathroomsTotal"),
-        "sqft": sqft,
-        "rent": rent,
-        "lease_months": lease,
-        "furnished": props.get("Furnished"),
-        "building_type": props.get("Building Type"),
-        # Image URLs are kept on the dict during scraping so download_images
-        # can consume them; persist_listing then writes them to listing_images.
-        "image_urls": image_urls,
-    }
-
-
-# ── Fetchers ─────────────────────────────────────────────────────────────────
-
-
-def fetch_search_page(url: str, client: httpx.Client) -> list[dict]:
-    print(f"  → GET {url}")
-    try:
-        response = client.get(url, timeout=15)
-    except Exception as e:
-        print(f"  ✗ Request failed: {e}")
-        return []
-
-    print(f"  ← {response.status_code} ({len(response.text):,} chars)")
-    if response.status_code != 200:
-        return []
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    tag = soup.find("script", {"type": "application/ld+json"})
-    if not tag:
-        print("  ✗ No ld+json tag found")
-        return []
-
-    try:
-        graph = json.loads(tag.string).get("@graph", [])
-    except json.JSONDecodeError as e:
-        print(f"  ✗ Failed to parse ld+json: {e}")
-        return []
-
-    listings = [parse_listing(it) for it in graph if it.get("@type") == "Apartment"]
-    print(f"  ✓ Parsed {len(listings)} listings from page")
-    return listings
-
-
-def _download_one(url: str, dest_path: str, client) -> bool:
-    """Download a single URL to dest_path. Returns True on success or if it already exists.
-
-    Generic enough that ``backfill_details.py`` reuses it for floor-plan downloads
-    (passing in its own curl_cffi session in place of an httpx.Client)."""
-    if os.path.exists(dest_path):
-        return True
-    try:
-        r = client.get(url, timeout=15)
-        r.raise_for_status()
-        with open(dest_path, "wb") as f:
-            f.write(r.content)
-        return True
-    except Exception as e:
-        print(f"    ✗ download failed ({url}): {e}")
-        return False
-
-
-def download_images(listing: dict, base_dir: str, client: httpx.Client) -> list[Optional[str]]:
-    """Download all listing images into images/<building>/<unit>/.
-
-    Filenames use the Zillow CDN hash (last path segment of the URL).
-    Returns a list of local paths in the same order as listing['image_urls'];
-    failed downloads produce a None placeholder so positional alignment is
-    preserved when we write to listing_images.
-    """
-    building = listing.get("building_slug") or listing["listing_id"]
-    unit = listing.get("unit") or listing["listing_id"]
-    unit_dir = os.path.join(base_dir, building, unit)
-    os.makedirs(unit_dir, exist_ok=True)
-
-    local_paths: list[Optional[str]] = []
-    for img_url in listing.get("image_urls", []):
-        filename = img_url.split("/")[-1]  # e.g. "b0c21bbf...-p_e.webp"
-        filepath = os.path.join(unit_dir, filename)
-
-        if _download_one(img_url, filepath, client):
-            local_paths.append(filepath)
-        else:
-            local_paths.append(None)  # keep positional alignment
-
-    return local_paths
-
-
-# ── Persist ──────────────────────────────────────────────────────────────────
+# Re-exported so ``import scrape_listings`` stays a one-stop namespace for the
+# parsing/URL/download helpers (tests and backfill_details rely on this).
+__all__ = [
+    "HEADERS", "_download_one", "download_images",
+    "build_url", "parse_listing", "fetch_search_page",
+    "persist_listing", "scrape", "main",
+]
 
 
 def persist_listing(conn: sqlite3.Connection, listing: dict) -> None:
@@ -222,9 +65,6 @@ def persist_listing(conn: sqlite3.Connection, listing: dict) -> None:
         )
 
     conn.commit()
-
-
-# ── Main ─────────────────────────────────────────────────────────────────────
 
 
 def scrape(
