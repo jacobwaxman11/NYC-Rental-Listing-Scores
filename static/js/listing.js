@@ -49,6 +49,13 @@ if (mapEl && window.L) {
   }
 }
 
+// ── Building units: reveal the capped overflow ──
+const unitsMore = document.getElementById('units-more');
+if (unitsMore) unitsMore.addEventListener('click', () => {
+  document.querySelectorAll('#unit-list .unit.extra').forEach(u => { u.hidden = false; });
+  unitsMore.remove();
+});
+
 // ── Like / Pass ──
 // Like and pass are mutually exclusive — the backend stores a single reaction,
 // so we just repaint both buttons from whatever it returns.

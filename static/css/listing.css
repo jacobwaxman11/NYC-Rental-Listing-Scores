@@ -101,6 +101,9 @@
 .unit-rent .mo { font-size:12px; color:var(--muted); font-weight:400; }
 .unit-top .badge { padding:2px 8px; border-radius:999px; font-size:11px; font-weight:650; }
 .unit-meta { color:var(--muted); font-size:12px; }
+.units-more { margin-top:12px; width:100%; background:#1f2734; border:1px solid var(--line);
+              color:var(--txt); border-radius:9px; padding:9px; font-size:13px; cursor:pointer; }
+.units-more:hover { border-color:#3a4252; }
 
 /* Map */
 #map { height:360px; border-radius:12px; overflow:hidden; }
